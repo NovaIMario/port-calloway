@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Port Calloway</title>
+  <meta name="description" content="An open-world driving game in the browser: a procedurally built harbour city with traffic, police chases, stunt jumps and a short story, written in JavaScript and Three.js.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e0703a'/%3E%3Cpath d='M6 22h20M9 22V12l7-4 7 4v10' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    { "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    } }
+  </script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <canvas id="game" tabindex="0"></canvas>
+
+  <div id="hud" hidden>
+    <div class="tl">
+      <div id="cash">$0</div>
+      <div id="heat" aria-label="Police heat"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="bar small"><div id="player-health"></div></div>
+    </div>
+    <div class="tr">
+      <canvas id="minimap" width="360" height="360"></canvas>
+      <div class="under-map"><span id="area"></span><span id="clock"></span></div>
+    </div>
+    <div id="objective" hidden></div>
+    <div id="timer" hidden></div>
+    <div id="car-panel" hidden>
+      <div class="speed"><span id="speed">0</span><small>km/h</small></div>
+      <div id="car-name"></div>
+      <div class="bar"><div id="car-health"></div></div>
+    </div>
+    <div id="radio"></div>
+    <div id="prompt" hidden></div>
+    <div id="notice" hidden></div>
+    <div id="subtitle" hidden></div>
+    <div id="banner" hidden><div id="banner-title"></div><div id="banner-sub"></div></div>
+    <div id="touch" hidden>
+      <div id="stick"><div id="knob"></div></div>
+      <div class="tbtns">
+        <button data-t="enter">Car</button><button data-t="brake">Brake</button>
+        <button data-t="horn">Horn</button><button data-t="radio">Radio</button>
+        <button data-t="map">Map</button><button data-t="pause">II</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mapview" hidden>
+    <canvas id="bigmap"></canvas>
+    <div class="map-legend">
+      <span><i style="background:#f2c230"></i>Job / stunt ramp</span>
+      <span><i style="background:#ff5a4f"></i>Target</span>
+      <span><i style="background:#4f8cff"></i>Police</span>
+      <span><i style="background:#fff"></i>Place</span>
+      <span class="muted">M or Esc to close</span>
+    </div>
+  </div>
+
+  <div id="title" class="screen">
+    <div class="title-card">
+      <div class="logo"><span>PORT</span><span>CALLOWAY</span></div>
+      <p class="tag">A harbour town, a debt, and a lot of fast cars.</p>
+      <div id="loading">Building the city…</div>
+      <div class="menu" hidden id="menu">
+        <button id="play" class="primary">Play</button>
+        <button id="newgame" hidden>New game</button>
+      </div>
+      <div class="controls">
+        <div><kbd>W A S D</kbd> drive or walk</div>
+        <div><kbd>Space</kbd> handbrake or jump</div>
+        <div><kbd>F</kbd> get in or out of a car</div>
+        <div><kbd>Shift</kbd> sprint</div>
+        <div><kbd>Mouse</kbd> look around</div>
+        <div><kbd>R</kbd> change radio station</div>
+        <div><kbd>M</kbd> map</div>
+        <div><kbd>C</kbd> camera distance</div>
+        <div><kbd>H</kbd> horn</div>
+        <div><kbd>Esc</kbd> pause</div>
+      </div>
+      <p class="small">Gamepads work too. Best in a desktop browser.</p>
+    </div>
+  </div>
+
+  <div id="pause" class="screen" hidden>
+    <div class="title-card narrow">
+      <h2>Paused</h2>
+      <div class="menu">
+        <button id="resume" class="primary">Resume</button>
+        <button id="restart-mission" hidden>Restart job</button>
+      </div>
+      <label>Music volume <input id="vol-music" type="range" min="0" max="1" step="0.05" value="0.6"></label>
+      <label>Effects volume <input id="vol-sfx" type="range" min="0" max="1" step="0.05" value="0.8"></label>
+      <label>Mouse sensitivity <input id="sens" type="range" min="0.3" max="2.5" step="0.1" value="1"></label>
+      <label><input id="shadows" type="checkbox" checked> Shadows</label>
+      <div id="progress" class="progress"></div>
+      <p class="small"><a href="https://github.com/NovaIMario/port-calloway" target="_blank" rel="noopener">Source on GitHub</a></p>
+    </div>
+  </div>
+</body>
+</html>
