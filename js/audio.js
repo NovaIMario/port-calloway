@@ -10,7 +10,15 @@ const STATIONS = [
 ];
 const PROGRESSIONS = [[0, 5, 3, 4], [0, 3, 4, 4], [5, 3, 0, 4], [0, 4, 5, 3], [0, 5, 1, 4], [3, 4, 0, 0]];
 const MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
-const GEARS = [0, 11, 20, 30, 42, 56, 80];
+const GEARS = [0, 11, 20, 30, 42, 56, 80, 96];
+const ENGINE_NOTE = { van: 34, armored: 34, sports: 58, gt: 54, super: 64, hyper: 70 }; // base pitch, Hz
+// gunshots: [noise length s, loudness, filter, cutoff Hz, thump from Hz, thump length s]
+const GUNS = {
+  pistol: [0.14, 0.55, 'bandpass', 1700, 190, 0.1],
+  smg: [0.09, 0.4, 'bandpass', 2300, 220, 0.06],
+  shotgun: [0.42, 0.85, 'lowpass', 1500, 140, 0.3],
+  rifle: [0.18, 0.62, 'highpass', 900, 170, 0.14],
+};
 
 export class GameAudio {
   constructor() {
@@ -94,7 +102,7 @@ export class GameAudio {
       const frac = clamp((vl - GEARS[g - 1]) / (GEARS[g] - GEARS[g - 1]), 0, 1);
       const rpm = 0.2 + frac * 0.8 + (v.airborne ? 0.3 : 0);
       const thr = v.input.throttle;
-      const base = v.m.kind === 'van' || v.m.kind === 'armored' ? 34 : v.m.kind === 'sports' ? 58 : 46;
+      const base = ENGINE_NOTE[v.m.kind] ?? 46;
       this.set(this.eng.a.frequency, base + rpm * base * 1.6);
       this.set(this.eng.b.frequency, (base + rpm * base * 1.6) * 0.5);
       this.set(this.eng.f.frequency, 250 + rpm * 900 + thr * 700);
@@ -262,4 +270,28 @@ export class GameAudio {
   blip(vol = 1) { this.sweep(880, 1320, 0.12, 0.12 * vol); }
   cash() { if (this.ok()) { this.sweep(1320, 1330, 0.1, 0.1); setTimeout(() => this.sweep(1760, 1770, 0.18, 0.1), 90); } }
   siren() { this.sweep(700, 1300, 0.35, 0.05, 'square'); setTimeout(() => this.sweep(1300, 700, 0.35, 0.05, 'square'), 350); }
+
+  // A gunshot: a burst of filtered noise for the crack and a falling tone for the thump.
+  // Far away it is quieter and duller.
+  gun(kind, near = 1) {
+    if (!this.ok() || near <= 0) return;
+    const [len, vol, type, cutoff, f0, thump] = GUNS[kind] || GUNS.pistol;
+    const v = vol * (0.15 + 0.85 * near);
+    const t = this.ctx.currentTime;
+    this.noiseHit(t, len * (0.7 + 0.6 * (1 - near)), v, near > 0.6 ? type : 'lowpass', near > 0.6 ? cutoff : cutoff * 0.5, this.sfx);
+    this.sweep(f0, 45, thump, v * 0.9);
+  }
+  dry() { if (this.ok()) this.noiseHit(this.ctx.currentTime, 0.02, 0.25, 'highpass', 3500, this.sfx); }
+  reload(seconds = 1.2) {
+    if (!this.ok()) return;
+    const t = this.ctx.currentTime;
+    this.noiseHit(t + 0.05, 0.03, 0.22, 'bandpass', 2400, this.sfx);
+    this.noiseHit(t + seconds * 0.85, 0.05, 0.3, 'bandpass', 1500, this.sfx);
+  }
+  punch(hit = true, near = 1) {
+    if (!this.ok() || near <= 0) return;
+    if (hit) { this.sweep(210, 55, 0.09, 0.45 * near); this.noiseHit(this.ctx.currentTime, 0.05, 0.25 * near, 'lowpass', 900, this.sfx); }
+    else this.noiseHit(this.ctx.currentTime, 0.12, 0.08 * near, 'bandpass', 700, this.sfx);
+  }
+  pickup() { this.sweep(660, 990, 0.08, 0.1); setTimeout(() => this.sweep(990, 1320, 0.1, 0.08), 70); }
 }

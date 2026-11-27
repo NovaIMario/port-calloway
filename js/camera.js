@@ -1,7 +1,7 @@
-// Third-person camera: a chase camera in vehicles and an orbit camera on foot. It pulls in
-// when a building is between it and the player.
+// Third-person camera: a chase camera in vehicles, an orbit camera on foot, and an
+// over-the-shoulder view while aiming. It pulls in when a building is between it and the player.
 import * as THREE from 'three';
-import { clamp, wrapAngle, forwardOf } from './util.js';
+import { clamp, wrapAngle, forwardOf, rightOf } from './util.js';
 
 const MODES = [
   { dist: 7.2, height: 2.4, look: 1.3 },
@@ -24,19 +24,29 @@ export class CameraRig {
     this.look = new THREE.Vector3();
     this.shake = 0;
     this.scratch = [];
+    this.aimPitch = 0;
+    this.dir = new THREE.Vector3();
   }
 
   snap() { this.snapNext = true; }
+
+  // Where the middle of the screen points: what a free-aimed shot hits.
+  aimRay(device = 'keyboard') {
+    const d = this.camera.getWorldDirection(this.dir), o = this.camera.position;
+    return { o: { x: o.x, y: o.y, z: o.z }, d: { x: d.x, y: d.y, z: d.z }, free: device === 'keyboard' };
+  }
 
   update(dt, player, c) {
     const v = player.vehicle;
     const desired = new THREE.Vector3(), look = new THREE.Vector3();
     const hasLook = Math.abs(c.lookX) + Math.abs(c.lookY) > 0.0005;
     if (hasLook) this.idle = 0; else this.idle += dt;
+    let clipFrom = look, rate = v ? 12 : 14, lookRate = 18;
     if (v) {
       const M = MODES[this.mode];
       if (hasLook) { this.manual = wrapAngle(this.manual - c.lookX); this.pitch = clamp(this.pitch + c.lookY, -0.1, 0.9); }
-      if (this.idle > 1.2) { this.manual *= Math.exp(-3 * dt); this.pitch += (0.2 - this.pitch) * (1 - Math.exp(-2 * dt)); }
+      // shooting out of the window: the camera stays where you point it
+      if (this.idle > 1.2 && !player.driveAim) { this.manual *= Math.exp(-3 * dt); this.pitch += (0.2 - this.pitch) * (1 - Math.exp(-2 * dt)); }
       let base = v.h;
       const vl = v.vx * Math.sin(v.h) + v.vz * Math.cos(v.h);
       if (v.speed > 4 && vl > 0) base = lerpAngle(v.h, Math.atan2(v.vx, v.vz), 0.45);
@@ -52,22 +62,35 @@ export class CameraRig {
     } else {
       if (hasLook) { this.yaw = wrapAngle(this.yaw - c.lookX); this.pitch = clamp(this.pitch + c.lookY, -0.5, 1.2); }
       const moving = Math.abs(c.moveX) + Math.abs(c.moveY) > 0 && player.speed > 1;
-      if (this.idle > 2 && moving && c.moveY >= 0) this.yaw = lerpAngle(this.yaw, player.h, 1 - Math.exp(-1.2 * dt));
-      const dist = 4.6;
-      const f = forwardOf(this.yaw);
-      desired.set(
-        player.x - f.x * dist * Math.cos(this.pitch),
-        player.y + 1.6 + dist * Math.sin(this.pitch),
-        player.z - f.z * dist * Math.cos(this.pitch),
-      );
-      look.set(player.x, player.y + 1.45, player.z);
-      if (Math.abs(this.camera.fov - 62) > 0.05) { this.camera.fov += (62 - this.camera.fov) * Math.min(1, dt * 3); this.camera.updateProjectionMatrix(); }
+      let fov = 62;
+      if (player.aiming) {
+        // over the right shoulder, looking where the gun points
+        const ap = (this.aimPitch = clamp(this.pitch - 0.3, -0.75, 0.85));
+        const f = forwardOf(this.yaw), rt = rightOf(this.yaw);
+        const dir = this.dir.set(f.x * Math.cos(ap), -Math.sin(ap), f.z * Math.cos(ap));
+        const shoulder = new THREE.Vector3(player.x + rt.x * 0.85, player.y + 1.72, player.z + rt.z * 0.85);
+        desired.copy(shoulder).addScaledVector(dir, -2.9);
+        look.copy(shoulder).addScaledVector(dir, 12);
+        clipFrom = shoulder;
+        rate = 26; lookRate = 40; fov = 55;
+      } else {
+        if (this.idle > 2 && moving && c.moveY >= 0) this.yaw = lerpAngle(this.yaw, player.h, 1 - Math.exp(-1.2 * dt));
+        const dist = 4.6;
+        const f = forwardOf(this.yaw);
+        desired.set(
+          player.x - f.x * dist * Math.cos(this.pitch),
+          player.y + 1.6 + dist * Math.sin(this.pitch),
+          player.z - f.z * dist * Math.cos(this.pitch),
+        );
+        look.set(player.x, player.y + 1.45, player.z);
+      }
+      if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * (player.aiming ? 10 : 3)); this.camera.updateProjectionMatrix(); }
     }
-    this.clip(look, desired);
+    this.clip(clipFrom, desired);
     if (desired.y < -1) desired.y = -1;
     if (this.snapNext) { this.pos.copy(desired); this.look.copy(look); this.snapNext = false; }
-    this.pos.lerp(desired, 1 - Math.exp(-(v ? 12 : 14) * dt));
-    this.look.lerp(look, 1 - Math.exp(-18 * dt));
+    this.pos.lerp(desired, 1 - Math.exp(-rate * dt));
+    this.look.lerp(look, 1 - Math.exp(-lookRate * dt));
     this.camera.position.copy(this.pos);
     if (this.shake > 0) {
       this.camera.position.x += (Math.random() - 0.5) * this.shake;

@@ -5,11 +5,14 @@ import { buildCityMeshes } from './render/cityMesh.js';
 import { buildProps } from './render/props.js';
 import { createVehicleMesh, updateVehicleMesh } from './render/vehicles.js';
 import { CrowdRenderer, PlayerView } from './render/people.js';
+import { PickupView } from './render/pickups.js';
 import { World } from './world.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
+import { ShopUI } from './shopui.js';
+import { lookOf } from './shops.js';
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('game');
@@ -24,16 +27,21 @@ async function boot() {
   const input = new Input(canvas);
   const rig = new CameraRig(gfx.camera, world.grid);
   const hud = new Hud(city);
-  const crowd = new CrowdRenderer(gfx.scene, 90);
-  const playerView = new PlayerView(gfx.scene, { skin: 0xc68a5e, hair: 0x1c1512, shirt: 0x2a8f8a, trousers: 0x23262e, accent: 0xe0703a });
+  const crowd = new CrowdRenderer(gfx.scene, 110);
+  const playerView = new PlayerView(gfx.scene, { skin: 0xc68a5e, hair: 0x1c1512, ...lookOf('harbour') });
   const views = new Map();
   const game = new Game({ world, hud, rig, gfx, props, meshes, input });
+  const shopUI = new ShopUI(game);
+  game.pickupView = new PickupView(gfx.scene);
 
   const addView = (v) => { const view = createVehicleMesh(v); gfx.scene.add(view.root); views.set(v, view); };
   const dropView = (v) => { const view = views.get(v); if (view) { gfx.scene.remove(view.root); views.delete(v); } };
   game.onVehicle = { add: addView, remove: dropView };
+  game.onShop = shopUI;
+  game.onLook = (look) => playerView.setLook(look);
 
   game.start();
+  playerView.setLook(lookOf(world.player.outfit));
   rig.yaw = world.player.h;
   rig.snap();
   window.portCalloway = game; // handy in the console
@@ -75,8 +83,13 @@ async function boot() {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    const c = input.read(game.sensitivity);
-    if (running) {
+    const c = input.read(game.sensitivity, !world.player.vehicle);
+    const inShop = shopUI.open;
+    if (running && inShop) {
+      // the shop has the keyboard; Escape (from outside the dialog) or B on a pad leaves
+      if (c.pause) shopUI.close();
+      shopUI.pad(c.ui);
+    } else if (running) {
       if (c.pause && !mapOpen) setPaused(!paused);
       if ((c.map || (c.pause && mapOpen)) && !paused) {
         mapOpen = !mapOpen;
@@ -84,21 +97,25 @@ async function boot() {
         if (mapOpen) hud.drawBigMap(world, game.blips(true));
       }
     }
-    if (running && !paused && !mapOpen) {
+    const live = running && !paused && !mapOpen && !inShop;
+    if (live) {
       acc += dt;
       let steps = 0;
       while (acc >= STEP && steps < 5) {
         game.update(STEP, c);
-        c.enter = c.jump = c.radio = c.camera = false;
+        // one-shot presses count once, however many steps this frame runs
+        c.enter = c.jump = c.radio = c.camera = c.fireHit = c.reload = c.nextWeapon = c.prevWeapon = false;
+        c.slot = 0;
         acc -= STEP;
         steps++;
+        if (shopUI.open) break; // walked into a shop
       }
       if (steps === 5) acc = 0;
     } else if (!running) {
       // slow orbit behind the title screen
       game.idle(dt);
-    }
-    game.render(dt, running && !paused && !mapOpen ? c : null);
+    } else acc = 0;
+    game.render(dt, live ? c : null);
     input.endFrame();
     for (const [v, view] of views) updateVehicleMesh(view, v, world.time);
     playerView.update(world.player);

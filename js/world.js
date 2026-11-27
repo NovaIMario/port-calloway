@@ -6,8 +6,12 @@ import { clamp, wrapAngle, forwardOf, rightOf, hash2, dist2 } from './util.js';
 import { areaName } from './city.js';
 
 export const CIVILIAN_MODELS = ['corso', 'corso', 'meridian', 'meridian', 'meridian', 'ranger', 'tasker', 'haulmark', 'cab', 'vireo'];
+export const SUPERCARS = ['halcyon', 'halcyon', 'vantor']; // now and then one turns up in traffic or a car park
 export const CAR_PAINT = [0xc8ccd2, 0x2b2f36, 0xf2f2ef, 0x9c1f24, 0x1f4e8c, 0x5a6b4a, 0x8a8f98, 0xd7a43b, 0x3c6e71, 0x6d2e46, 0xe0dccf, 0x23395b];
-export const paintFor = (model, k) => (model === 'cab' ? 0xf2c230 : model === 'interceptor' ? 0xf4f4f4 : model === 'armored' ? 0x3f4a3a : CAR_PAINT[Math.floor(k * CAR_PAINT.length) % CAR_PAINT.length]);
+const SUPER_PAINT = [0xf2c230, 0xe0703a, 0x9c1f24, 0x15171c, 0xf4f4f4, 0x3c6e71];
+export const paintFor = (model, k) => (model === 'cab' ? 0xf2c230 : model === 'interceptor' ? 0xf4f4f4 : model === 'armored' ? 0x3f4a3a
+  : SUPERCARS.includes(model) || model === 'volantis' ? SUPER_PAINT[Math.floor(k * SUPER_PAINT.length) % SUPER_PAINT.length]
+    : CAR_PAINT[Math.floor(k * CAR_PAINT.length) % CAR_PAINT.length]);
 
 const lerpAngle = (a, b, t) => a + wrapAngle(b - a) * t;
 
@@ -27,7 +31,10 @@ export class World {
     this.player = {
       x: 0, y: 0, z: 0, h: 0, vx: 0, vz: 0, vy: 0, speed: 0, grounded: true, vehicle: null,
       health: 100, swing: 0, phase: 0, down: 0, downTime: 0, hidden: false, cash: 0, area: '', bail: 0,
+      arms: {}, weapon: 'fist', armour: 0, aiming: false, faceT: 0, faceH: 0,
+      garage: [], outfits: ['harbour'], outfit: 'harbour',
     };
+    this.pickups = [];
     this.messages = [];
   }
 
@@ -90,12 +97,15 @@ export class World {
       let mx = f.x * c.moveY + r.x * c.moveX, mz = f.z * c.moveY + r.z * c.moveX;
       const len = Math.hypot(mx, mz);
       if (len > 1) { mx /= len; mz /= len; }
-      const top = c.sprint ? 7.4 : 3.3;
+      // aiming: walk slower and keep facing where the camera points (strafing)
+      const top = p.aiming ? 2.7 : c.sprint ? 7.4 : 3.3;
       const k = 1 - Math.exp(-(p.grounded ? 12 : 2) * dt);
       p.vx += (mx * top - p.vx) * k;
       p.vz += (mz * top - p.vz) * k;
-      if (len > 0.1) p.h = lerpAngle(p.h, Math.atan2(mx, mz), 1 - Math.exp(-14 * dt));
-      if (c.jump && p.grounded) { p.vy = 6.2; p.grounded = false; }
+      if (p.aiming) p.h = lerpAngle(p.h, camYaw, 1 - Math.exp(-25 * dt));
+      else if (p.faceT > 0) p.h = lerpAngle(p.h, p.faceH, 1 - Math.exp(-25 * dt));
+      else if (len > 0.1) p.h = lerpAngle(p.h, Math.atan2(mx, mz), 1 - Math.exp(-14 * dt));
+      if (c.jump && p.grounded && !p.aiming) { p.vy = 6.2; p.grounded = false; }
     }
     // Move one axis at a time so walls and water edges can be slid along.
     for (const axis of ['x', 'z']) {
@@ -141,6 +151,29 @@ export class World {
     who.grounded = false;
     who.health -= impact * 3.5;
     this.emit({ type: 'knock', who, impact, by });
+    // a hard enough hit is fatal for a pedestrian (the player goes to hospital instead)
+    if (who !== this.player && who.health <= 0 && !who.dead) {
+      Object.assign(who, { health: 0, dead: true, downTime: Infinity, state: 'dead', armsUp: false, aim: false, armed: false });
+      this.emit({ type: 'pedKilled', ped: who, by, weapon: 'car' });
+    }
+  }
+
+  // Move someone on foot by (dx, dz), sliding along walls, kerbs too tall to step up and the
+  // water's edge. Used by the police on foot.
+  moveOnFoot(b, dx, dz) {
+    const city = this.city;
+    for (const axis of [0, 1]) {
+      const nx = axis === 0 ? b.x + dx : b.x, nz = axis === 1 ? b.z + dz : b.z;
+      const g = heightAt(city, nx, nz);
+      if (g === null || g > b.y + 0.6) continue;
+      b.x = nx; b.z = nz;
+    }
+    b.y = heightAt(city, b.x, b.z) ?? b.y;
+    for (const col of this.grid.query(b.x - 1, b.z - 1, b.x + 1, b.z + 1)) {
+      if (col.broken || b.y > col.h) continue;
+      const hit = circleContact(b.x, b.z, 0.35, col);
+      if (hit) { b.x += hit.nx * hit.depth; b.z += hit.nz * hit.depth; }
+    }
   }
 
   nearestEnterable(maxDist = 3.6) {
@@ -257,7 +290,7 @@ export class World {
     this.city.parking.forEach((s, i) => {
       if (Math.abs(s.x - p.x) > R || Math.abs(s.z - p.z) > R) return;
       const k = hash2(Math.round(s.x), Math.round(s.z), 3);
-      if (!s.police && !s.wreck && k > 0.33) return;
+      if (!s.police && !s.wreck && !s.display && k > 0.33) return;
       wanted.push([Math.hypot(s.x - p.x, s.z - p.z), i, k]);
     });
     wanted.sort((a, b) => a[0] - b[0]);
@@ -268,14 +301,16 @@ export class World {
     wanted.slice(0, MAX_PARKED).forEach(([, i, k]) => {
       const s = this.city.parking[i];
       if (this.spawnedSpots.has(i)) return;
-      const model = s.police ? 'interceptor' : CIVILIAN_MODELS[Math.floor(hash2(i, 7) * CIVILIAN_MODELS.length)];
-      const v = this.addVehicle(model, s.x, s.z, s.h + (k - 0.25) * 0.1, { color: s.wreck ? 0x6b5a4a : paintFor(model, hash2(i, 11)), parked: true, spot: i });
+      const rare = !s.wreck && hash2(i, 13) < 0.03;
+      const model = s.display || (s.police ? 'interceptor' : rare ? SUPERCARS[Math.floor(hash2(i, 17) * SUPERCARS.length)] : CIVILIAN_MODELS[Math.floor(hash2(i, 7) * CIVILIAN_MODELS.length)]);
+      const color = s.color ?? (s.wreck ? 0x6b5a4a : paintFor(model, hash2(i, 11)));
+      const v = this.addVehicle(model, s.x, s.z, s.display ? s.h : s.h + (k - 0.25) * 0.1, { color, parked: true, spot: i });
       if (s.wreck) { v.health = 25; v.locked = true; }
-      if (s.police) v.locked = true;
+      if (s.police || s.display) v.locked = true;
       this.spawnedSpots.set(i, v);
     });
     for (const v of [...this.vehicles]) {
-      if (v === p.vehicle || v.mission || v.driver === 'player') continue;
+      if (v === p.vehicle || v.mission || v.driver === 'player' || (v.personal && !v.wrecked)) continue;
       const far = Math.abs(v.x - p.x) > R + 80 || Math.abs(v.z - p.z) > R + 80;
       if (far && (v.parked || v.wrecked || (!v.driver && !v.ai))) this.removeVehicle(v);
     }

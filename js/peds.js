@@ -1,12 +1,14 @@
 // Pedestrians walk loops around each block's pavement, cross at corners, scatter when
-// something dangerous happens nearby and get knocked flying by cars.
-import { HALF_ROAD, PITCH, HALF, N } from './city.js';
+// something dangerous happens nearby, get knocked flying by cars, and sometimes punch back.
+import { HALF_ROAD } from './city.js';
 import { heightAt } from './citygen.js';
 import { GRAVITY } from './physics.js';
+import { hurtPlayer } from './combat.js';
 import { mulberry32, pick, clamp, wrapAngle, forwardOf, rightOf } from './util.js';
 import { SKIN, SHIRTS, TROUSERS, HAIR } from './looks.js';
 
 const INSET = 2.3; // walking line, metres in from the kerb
+const MAX_BODIES = 24;
 const lerpAngle = (a, b, t) => a + wrapAngle(b - a) * t;
 
 function loopOf(g) {
@@ -36,6 +38,17 @@ function nearestS(L, x, z) {
   return L.w * 2 + L.d + (L.z1 - cz);
 }
 
+// A person in random clothes. `extra` overrides anything (a police uniform, a state).
+export function makePerson(r, x, z, y, extra = {}) {
+  return {
+    x, z, y, h: r() * 6.28, vx: 0, vz: 0, vy: 0, speed: 0,
+    skin: pick(r, SKIN), shirt: pick(r, SHIRTS), trousers: pick(r, TROUSERS), hair: pick(r, HAIR), sleeves: r() < 0.6,
+    swing: 0, phase: r() * 6, down: 0, downTime: 0, health: 100, walk: 1.1 + r() * 0.5, state: 'walk', dir: r() < 0.5 ? 1 : -1,
+    hitT: 0, punchT: 0,
+    ...extra,
+  };
+}
+
 export class Peds {
   constructor(world, seed = 9) {
     this.world = world;
@@ -43,7 +56,6 @@ export class Peds {
     this.loops = world.city.regions.map((g) => ({ g, L: loopOf(g) }));
     this.timer = 0;
     this.target = 55;
-    this.threats = [];
   }
 
   regionAt(x, z) {
@@ -51,13 +63,7 @@ export class Peds {
   }
 
   make(x, z, extra = {}) {
-    const r = this.r;
-    const p = {
-      x, z, y: heightAt(this.world.city, x, z) ?? 0, h: r() * 6.28, vx: 0, vz: 0, vy: 0, speed: 0,
-      skin: pick(r, SKIN), shirt: pick(r, SHIRTS), trousers: pick(r, TROUSERS), hair: pick(r, HAIR), sleeves: r() < 0.6,
-      swing: 0, phase: r() * 6, down: 0, downTime: 0, health: 100, walk: 1.1 + r() * 0.5, state: 'walk', dir: r() < 0.5 ? 1 : -1,
-      ...extra,
-    };
+    const p = makePerson(this.r, x, z, heightAt(this.world.city, x, z) ?? 0, extra);
     this.world.peds.push(p);
     return p;
   }
@@ -65,7 +71,7 @@ export class Peds {
   // Something scary happened at (x, z): people within `radius` run away from it.
   scare(x, z, radius = 25, from = null) {
     for (const p of this.world.peds) {
-      if (p.down || p.state === 'flee') continue;
+      if (p.down || p.cop || p.dead || p.state === 'flee') continue;
       const d = Math.hypot(p.x - x, p.z - z);
       if (d < radius) this.flee(p, x, z, 3 + this.r() * 3);
     }
@@ -79,6 +85,17 @@ export class Peds {
     p.armsUp = this.r() < 0.4;
   }
 
+  // Someone was hurt but is still standing: most run, a few punched people swing back.
+  onHurt(p, by, weapon) {
+    if (p.dead || p.cop || p.state === 'fight') return;
+    if (by === this.world.player && weapon === 'fist' && this.r() < 0.35) {
+      p.state = 'fight'; p.fightT = 10; p.swingT = 0.5; p.armsUp = false;
+      return;
+    }
+    this.flee(p, by?.x ?? p.x, by?.z ?? p.z, 5 + this.r() * 3);
+    p.armsUp = false;
+  }
+
   update(dt) {
     const w = this.world, pl = w.player;
     this.timer -= dt;
@@ -90,6 +107,8 @@ export class Peds {
 
   step(p, dt) {
     const w = this.world, city = w.city;
+    if (p.hitT > 0) p.hitT -= dt;
+    if (p.punchT > 0) p.punchT -= dt;
     // cars hitting people
     for (const v of w.vehicles) {
       if (v.speed < 3.5 || Math.abs(v.x - p.x) > 4 || Math.abs(v.z - p.z) > 4 || p.down) continue;
@@ -97,13 +116,14 @@ export class Peds {
       const dx = p.x - v.x, dz = p.z - v.z;
       if (Math.abs(dx * f.x + dz * f.z) < v.m.len / 2 + 0.3 && Math.abs(dx * rt.x + dz * rt.z) < v.m.wid / 2 + 0.3 && Math.abs(v.y - p.y) < 1.8) {
         w.knockDown(p, v.vx * 1.1, v.vz * 1.1, v.speed, v);
-        p.state = 'flee'; p.fleeT = 5; p.fx = v.x; p.fz = v.z;
+        if (!p.cop && !p.dead) { p.state = 'flee'; p.fleeT = 5; p.fx = v.x; p.fz = v.z; }
         this.scare(p.x, p.z, 18);
       }
     }
     if (p.down > 0) {
       p.downTime -= dt;
-      if (p.downTime <= 0) p.down = Math.max(0, p.down - dt * 2);
+      if (p.dead) p.down = Math.min(1, p.down + dt * 3.5); // crumple to the ground and stay there
+      else if (p.downTime <= 0) p.down = Math.max(0, p.down - dt * 2);
       p.vy -= GRAVITY * dt;
       const nx = p.x + p.vx * dt, nz = p.z + p.vz * dt;
       const g = heightAt(city, nx, nz);
@@ -115,7 +135,27 @@ export class Peds {
       p.swing = 0;
       return;
     }
+    if (p.cop || p.dead) return; // the police move their own officers
     let tx, tz, speed;
+    if (p.state === 'fight') {
+      const pl = w.player;
+      p.fightT -= dt;
+      const dx = pl.x - p.x, dz = pl.z - p.z, d = Math.hypot(dx, dz);
+      if (p.fightT <= 0 || d > 20 || pl.vehicle || pl.health <= 0) p.state = 'return';
+      else if (d > 1.05) { tx = pl.x; tz = pl.z; speed = 4.4; }
+      else {
+        tx = p.x; tz = p.z; speed = 0;
+        p.h = lerpAngle(p.h, Math.atan2(dx, dz), 1 - Math.exp(-10 * dt));
+        p.swingT -= dt;
+        if (p.swingT <= 0 && pl.down === 0) {
+          p.swingT = 0.8 + this.r() * 0.5;
+          p.punchT = 0.28;
+          if (this.r() < 0.15) w.knockDown(pl, (dx / d) * 3, (dz / d) * 3, 2, null);
+          else if (this.r() < 0.75) hurtPlayer(w, 6, p);
+          w.emit({ type: 'npcPunch', ped: p });
+        }
+      }
+    }
     if (p.state === 'flee') {
       p.fleeT -= dt;
       const dx = p.x - p.fx, dz = p.z - p.fz, d = Math.hypot(dx, dz) || 1;
@@ -125,7 +165,7 @@ export class Peds {
     } else if (p.state === 'cross') {
       tx = p.tx; tz = p.tz; speed = p.walk * 1.25;
       if (Math.hypot(tx - p.x, tz - p.z) < 0.8) { p.state = 'walk'; p.loop = p.nextLoop; p.s = nearestS(p.loop.L, p.x, p.z); }
-    } else {
+    } else if (p.state !== 'fight') {
       if (!p.loop || p.state === 'return') {
         const o = this.regionAt(p.x, p.z) || this.nearestLoop(p.x, p.z);
         if (!o) return;
@@ -187,11 +227,20 @@ export class Peds {
 
   stream() {
     const w = this.world, pl = w.player;
-    w.peds = w.peds.filter((p) => Math.hypot(p.x - pl.x, p.z - pl.z) < 135);
-    if (w.peds.length >= this.target) return;
+    const far = (p) => Math.hypot(p.x - pl.x, p.z - pl.z);
+    w.peds = w.peds.filter((p) => far(p) < 135);
+    // a lot of bodies about: tidy away the ones furthest off
+    const dead = w.peds.filter((p) => p.dead);
+    if (dead.length > MAX_BODIES) {
+      dead.sort((a, b) => far(b) - far(a));
+      const gone = new Set(dead.slice(0, dead.length - MAX_BODIES));
+      w.peds = w.peds.filter((p) => !gone.has(p));
+    }
+    let alive = w.peds.filter((p) => !p.dead && !p.cop).length;
+    if (alive >= this.target) return;
     const cf = forwardOf(w.cameraYaw ?? pl.h);
     const near = this.loops.filter((o) => Math.abs((o.g.x0 + o.g.x1) / 2 - pl.x) < 150 && Math.abs((o.g.z0 + o.g.z1) / 2 - pl.z) < 150);
-    for (let k = 0; k < 10 && w.peds.length < this.target && near.length; k++) {
+    for (let k = 0; k < 10 && alive < this.target && near.length; k++) {
       const o = pick(this.r, near);
       const s = this.r() * o.L.P;
       const q = loopPoint(o.L, s);
@@ -199,6 +248,7 @@ export class Peds {
       if (d < 22 || d > 105) continue;
       if (d < 55 && (dx * cf.x + dz * cf.z) / d > 0.3) continue;
       this.make(q.x, q.z, { loop: o, s });
+      alive++;
     }
   }
 }

@@ -2,29 +2,39 @@
 import { clamp } from './util.js';
 
 const PREVENT = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab']);
+const SLOTS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
 
 export class Input {
   constructor(el) {
     this.el = el;
     this.keys = new Set();
     this.hits = new Set();
+    this.mouse = new Set();
+    this.clicks = new Set();
+    this.wheel = 0;
     this.mdx = 0; this.mdy = 0;
     this.locked = false;
     this.pad = null;
     this.prevPad = [];
+    this.prevTrigger = false;
     this.touch = { x: 0, y: 0, active: false, buttons: new Set(), hits: new Set() };
     window.addEventListener('keydown', (e) => {
-      if (PREVENT.has(e.code) && e.target === document.body) e.preventDefault();
+      if (PREVENT.has(e.code) && (e.target === document.body || e.target === el)) e.preventDefault();
       if (e.repeat) return;
       this.keys.add(e.code);
       this.hits.add(e.code);
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
+    window.addEventListener('blur', () => { this.keys.clear(); this.mouse.clear(); });
     el.addEventListener('mousemove', (e) => {
       if (this.locked) { this.mdx += e.movementX; this.mdy += e.movementY; }
       else if (e.buttons & 1) { this.mdx += e.movementX; this.mdy += e.movementY; }
     });
+    // left button shoots or punches, right button aims
+    el.addEventListener('mousedown', (e) => { this.mouse.add(e.button); this.clicks.add(e.button); });
+    window.addEventListener('mouseup', (e) => this.mouse.delete(e.button));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    el.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
     document.addEventListener('pointerlockchange', () => { this.locked = document.pointerLockElement === el; });
   }
 
@@ -35,9 +45,10 @@ export class Input {
   down(...codes) { return codes.some((c) => this.keys.has(c)); }
   hit(...codes) { return codes.some((c) => this.hits.has(c)); }
 
-  // Collapse every device into one controls object.
-  read(sensitivity = 1) {
+  // Collapse every device into one controls object. onFoot changes what a few pad buttons do.
+  read(sensitivity = 1, onFoot = true) {
     const k = (...c) => (this.down(...c) ? 1 : 0);
+    const slot = SLOTS.findIndex((s) => this.hits.has(s)) + 1;
     const c = {
       moveX: k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft'),
       moveY: k('KeyW', 'ArrowUp') - k('KeyS', 'ArrowDown'),
@@ -56,14 +67,22 @@ export class Input {
       lookX: this.mdx * 0.0025 * sensitivity,
       lookY: this.mdy * 0.0025 * sensitivity,
       lookBack: this.down('KeyQ'),
+      fire: this.mouse.has(0),
+      fireHit: this.clicks.has(0),
+      aim: this.mouse.has(2),
+      reload: this.hit('KeyR'),
+      slot: slot || 0,
+      nextWeapon: this.hit('Tab') || this.wheel > 0,
+      prevWeapon: this.wheel < 0,
+      ui: { up: false, down: false, ok: false, back: false },
       device: 'keyboard',
     };
-    this.readPad(c);
-    this.readTouch(c);
+    this.readPad(c, onFoot);
+    this.readTouch(c, onFoot);
     return c;
   }
 
-  readPad(c) {
+  readPad(c, onFoot) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const p = [...pads].find((x) => x && x.connected);
     if (!p) return;
@@ -73,7 +92,7 @@ export class Input {
     const edge = (i) => pressed(i) && !this.prevPad[i];
     const lx = dz(p.axes[0] ?? 0), ly = dz(p.axes[1] ?? 0), rx = dz(p.axes[2] ?? 0), ry = dz(p.axes[3] ?? 0);
     const used = lx || ly || rx || ry || p.buttons.some((x) => x.pressed);
-    if (!used) { this.prevPad = p.buttons.map((x) => x.pressed); return; }
+    if (!used) { this.prevPad = p.buttons.map((x) => x.pressed); this.prevTrigger = false; return; }
     c.device = 'gamepad';
     c.moveX = clamp(c.moveX + lx, -1, 1);
     c.moveY = clamp(c.moveY - ly, -1, 1);
@@ -84,18 +103,37 @@ export class Input {
     c.jump ||= edge(0);
     c.sprint ||= pressed(1);
     c.enter ||= edge(3);
-    c.horn ||= pressed(2);
-    c.radio ||= edge(5);
     c.camera ||= edge(4);
     c.map ||= edge(8);
     c.pause ||= edge(9);
     c.lookX += rx * 0.05;
     c.lookY += ry * 0.035;
     c.lookBack ||= pressed(10);
+    if (onFoot) {
+      // LT aims, RT shoots, X reloads, RB and the d-pad change weapon
+      const trigger = b(7) > 0.35;
+      c.aim ||= b(6) > 0.35;
+      c.fire ||= trigger;
+      c.fireHit ||= trigger && !this.prevTrigger;
+      this.prevTrigger = trigger;
+      c.reload ||= edge(2);
+      c.nextWeapon ||= edge(5) || edge(15);
+      c.prevWeapon ||= edge(14);
+    } else {
+      // in a car the triggers drive: hold B to lean out and aim, X to shoot (and the horn otherwise)
+      c.horn ||= pressed(2) && !pressed(1);
+      c.radio ||= edge(5);
+      c.aim ||= pressed(1);
+      c.fire ||= pressed(1) && pressed(2);
+      c.fireHit ||= pressed(1) && edge(2);
+      c.nextWeapon ||= edge(15);
+      c.prevWeapon ||= edge(14);
+    }
+    c.ui = { up: edge(12), down: edge(13), ok: edge(0), back: edge(1) };
     this.prevPad = p.buttons.map((x) => x.pressed);
   }
 
-  readTouch(c) {
+  readTouch(c, onFoot) {
     const t = this.touch;
     if (!t.active && !t.buttons.size && !t.hits.size) return;
     c.device = 'touch';
@@ -112,10 +150,16 @@ export class Input {
     c.radio ||= t.hits.has('radio');
     c.map ||= t.hits.has('map');
     c.pause ||= t.hits.has('pause');
+    c.fire ||= t.buttons.has('fire');
+    c.fireHit ||= t.hits.has('fire');
+    if (!onFoot && t.buttons.has('fire')) c.aim = true; // shooting from a car aims where the camera looks
+    c.nextWeapon ||= t.hits.has('gun');
   }
 
   endFrame() {
     this.hits.clear();
+    this.clicks.clear();
+    this.wheel = 0;
     this.touch.hits.clear();
     this.mdx = 0; this.mdy = 0;
   }

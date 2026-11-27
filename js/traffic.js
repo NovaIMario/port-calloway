@@ -4,7 +4,7 @@
 import { HALF_ROAD, LANE } from './city.js';
 import { signalState } from './citygen.js';
 import { clamp, forwardOf, rightOf, mulberry32, pick } from './util.js';
-import { CIVILIAN_MODELS, paintFor } from './world.js';
+import { CIVILIAN_MODELS, SUPERCARS, paintFor } from './world.js';
 
 export function buildLanes(city) {
   const lanes = [];
@@ -314,7 +314,7 @@ export class Traffic {
         const f = forwardOf(v.h);
         if (dx * f.x + dz * f.z < -3 && forwardOf(s.h).x * f.x + forwardOf(s.h).z * f.z > 0.5) ai.yieldT = 1.5;
       }
-      if (v.wrecked || v.health < 30 || v.sinking) { this.abandon(v); continue; }
+      if (v.wrecked || v.health < 30 || v.sinking || ai.shot) { this.abandon(v); continue; }
       if (ai.shock > 0) {
         ai.shock -= dt;
         v.input.throttle = 0; v.input.brake = 0.4; v.input.steer = 0;
@@ -360,7 +360,7 @@ export class Traffic {
       if (d < 45 || d > 210) continue;
       if (d < 140 && (dx * cf.x + dz * cf.z) / d > 0.2) continue;
       if (w.vehicles.some((o) => Math.abs(o.x - x) < 14 && Math.abs(o.z - z) < 14)) continue;
-      const model = CIVILIAN_MODELS[Math.floor(this.r() * CIVILIAN_MODELS.length)];
+      const model = this.r() < 0.025 ? pick(this.r, SUPERCARS) : CIVILIAN_MODELS[Math.floor(this.r() * CIVILIAN_MODELS.length)];
       const v = w.addVehicle(model, x, z, Math.atan2(lane.dx, lane.dz), { color: paintFor(model, this.r()), driver: 'npc' });
       this.attach(v, lane, t);
       const s = v.ai.cruise * 0.8;

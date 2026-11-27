@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Port Calloway</title>
-  <meta name="description" content="An open-world driving game in the browser: a procedurally built harbour city with traffic, police chases, stunt jumps and a short story, written in JavaScript and Three.js.">
+  <meta name="description" content="An open-world game in the browser: a procedurally built harbour city with traffic, police chases, gunfights, shops, supercars, stunt jumps and a short story, written in JavaScript and Three.js.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23e0703a'/%3E%3Cpath d='M6 22h20M9 22V12l7-4 7 4v10' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <script type="importmap">
@@ -19,11 +19,21 @@
   <canvas id="game" tabindex="0"></canvas>
 
   <div id="hud" hidden>
+    <div id="hurt"></div>
     <div class="tl">
-      <div id="cash">$0</div>
+      <div class="tl-row">
+        <div id="cash">$0</div>
+        <div id="weapon" hidden>
+          <svg id="weapon-icon" viewBox="0 0 64 24" aria-hidden="true"></svg>
+          <div><div id="weapon-name"></div><div id="weapon-ammo"></div></div>
+        </div>
+      </div>
       <div id="heat" aria-label="Police heat"><i></i><i></i><i></i><i></i><i></i></div>
-      <div class="bar small"><div id="player-health"></div></div>
+      <div class="bar small" aria-label="Health"><div id="player-health"></div></div>
+      <div class="bar small" id="armour-bar" aria-label="Body armour" hidden><div id="player-armour"></div></div>
     </div>
+    <div id="crosshair" hidden><i></i><i></i><i></i><i></i><b></b></div>
+    <div id="target" hidden></div>
     <div class="tr">
       <canvas id="minimap" width="360" height="360"></canvas>
       <div class="under-map"><span id="area"></span><span id="clock"></span></div>
@@ -43,6 +53,7 @@
     <div id="touch" hidden>
       <div id="stick"><div id="knob"></div></div>
       <div class="tbtns">
+        <button data-t="fire" class="fire">Fire</button><button data-t="gun">Gun</button>
         <button data-t="enter">Car</button><button data-t="brake">Brake</button>
         <button data-t="horn">Horn</button><button data-t="radio">Radio</button>
         <button data-t="map">Map</button><button data-t="pause">II</button>
@@ -56,15 +67,36 @@
       <span><i style="background:#f2c230"></i>Job / stunt ramp</span>
       <span><i style="background:#ff5a4f"></i>Target</span>
       <span><i style="background:#4f8cff"></i>Police</span>
+      <span><i style="background:#4fd18b"></i>Your car</span>
       <span><i style="background:#fff"></i>Place</span>
+      <span><i class="sq" style="background:#ff8a3a"></i>Gunwale Arms</span>
+      <span><i class="sq" style="background:#7fe0a4"></i>Night Owl</span>
+      <span><i class="sq" style="background:#e889b0"></i>Threadline</span>
+      <span><i class="sq" style="background:#b9a2ff"></i>Strand Motors</span>
+      <span><i class="sq" style="background:#4ab0b5"></i>Lock-up</span>
       <span class="muted">M or Esc to close</span>
+    </div>
+  </div>
+
+  <div id="shop" class="screen" role="dialog" aria-modal="true" aria-labelledby="shop-title" hidden>
+    <div class="shop-card">
+      <header>
+        <div><h2 id="shop-title"></h2><p id="shop-tag"></p></div>
+        <div id="shop-cash"></div>
+      </header>
+      <div id="shop-list"></div>
+      <p id="shop-msg" role="status" aria-live="polite"></p>
+      <footer>
+        <span class="small"><kbd>↑</kbd> <kbd>↓</kbd> choose · <kbd>Enter</kbd> buy · <kbd>Esc</kbd> leave</span>
+        <button id="shop-close">Leave</button>
+      </footer>
     </div>
   </div>
 
   <div id="title" class="screen">
     <div class="title-card">
       <div class="logo"><span>PORT</span><span>CALLOWAY</span></div>
-      <p class="tag">A harbour town, a debt, and a lot of fast cars.</p>
+      <p class="tag">A harbour town, a debt, a lot of fast cars, and nobody playing fair.</p>
       <div id="loading">Building the city…</div>
       <div class="menu" hidden id="menu">
         <button id="play" class="primary">Play</button>
@@ -76,13 +108,15 @@
         <div><kbd>F</kbd> get in or out of a car</div>
         <div><kbd>Shift</kbd> sprint</div>
         <div><kbd>Mouse</kbd> look around</div>
-        <div><kbd>R</kbd> change radio station</div>
+        <div><kbd>Left click</kbd> shoot or punch</div>
+        <div><kbd>Right click</kbd> aim (hold)</div>
+        <div><kbd>1</kbd>–<kbd>5</kbd> <kbd>Wheel</kbd> change weapon</div>
+        <div><kbd>R</kbd> reload, or radio in a car</div>
         <div><kbd>M</kbd> map</div>
         <div><kbd>C</kbd> camera distance</div>
-        <div><kbd>H</kbd> horn</div>
-        <div><kbd>Esc</kbd> pause</div>
+        <div><kbd>H</kbd> horn · <kbd>Esc</kbd> pause</div>
       </div>
-      <p class="small">Gamepads work too. Best in a desktop browser.</p>
+      <p class="small">Walk into a shop's doorway to go in. Hold right click in a car to shoot out of the window.<br>Gamepads work too. Best in a desktop browser.</p>
     </div>
   </div>
 

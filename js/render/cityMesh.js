@@ -115,7 +115,31 @@ export function buildCityMeshes(city, scene) {
     m.rotation.y = s.h;
     scene.add(m);
   }
+  if (city.awnings?.length) scene.add(buildAwnings(city.awnings));
   return out;
+}
+
+// Striped shop awnings: sloping down from the wall, with a short flap along the front edge.
+function buildAwnings(list) {
+  const g = new Geo(), uv = [[0, 0], [1, 0], [1, 1], [0, 1]];
+  for (const a of list) {
+    const lo = a.along ? a.x0 : a.z0, hi = a.along ? a.x1 : a.z1;
+    const wall = a.out < 0 ? (a.along ? a.z1 : a.x1) : (a.along ? a.z0 : a.x0);
+    const edge = a.out < 0 ? (a.along ? a.z0 : a.x0) : (a.along ? a.z1 : a.x1);
+    const yHi = a.y + 0.55, yLo = a.y, flap = 0.28;
+    // point at distance t along the frontage, d out from the wall, height y
+    const P = (t, d, y) => (a.along ? [t, y, d] : [d, y, t]);
+    const n = Math.max(2, Math.round((hi - lo) / 0.5));
+    for (let i = 0; i < n; i++) {
+      const t0 = lo + ((hi - lo) * i) / n, t1 = lo + ((hi - lo) * (i + 1)) / n;
+      const color = i % 2 ? 0xf4f1ea : a.color;
+      g.quad(P(t0, wall, yHi), P(t1, wall, yHi), P(t1, edge, yLo), P(t0, edge, yLo), [0, 1, 0], uv, color);
+      g.quad(P(t0, edge, yLo), P(t1, edge, yLo), P(t1, edge, yLo - flap), P(t0, edge, yLo - flap), [0, 0, 1], uv, color);
+    }
+  }
+  const m = new THREE.Mesh(g.build(), new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }));
+  m.castShadow = m.receiveShadow = true;
+  return m;
 }
 
 function buildBuildings(city, scene, out) {

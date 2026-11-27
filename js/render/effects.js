@@ -1,7 +1,8 @@
-// Particles (smoke, fire, sparks, splashes) and tyre marks.
+// Particles (smoke, fire, sparks, splashes), tyre marks, bullet tracers and muzzle flashes.
 import * as THREE from 'three';
 
 const MAX = 1800;
+const TRACERS = 128;
 
 export class Effects {
   constructor(scene) {
@@ -38,6 +39,43 @@ export class Effects {
     this.markNext = 0;
     scene.add(this.marks);
     this.dummy = new THREE.Object3D();
+
+    // tracers: short-lived line segments, bright at the gun end
+    const tg = new THREE.BufferGeometry();
+    this.tPos = new Float32Array(TRACERS * 6);
+    this.tCol = new Float32Array(TRACERS * 8);
+    tg.setAttribute('position', new THREE.BufferAttribute(this.tPos, 3).setUsage(THREE.DynamicDrawUsage));
+    tg.setAttribute('color', new THREE.BufferAttribute(this.tCol, 4).setUsage(THREE.DynamicDrawUsage));
+    this.tracerLines = new THREE.LineSegments(tg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, fog: false }));
+    this.tracerLines.frustumCulled = false;
+    this.tracerLines.renderOrder = 6;
+    scene.add(this.tracerLines);
+    this.tracers = [];
+  }
+
+  tracer(x0, y0, z0, x1, y1, z1) {
+    if (this.tracers.length >= TRACERS) this.tracers.shift();
+    // start a little way out of the barrel so it reads as a streak, not a line from the hand
+    const l = Math.hypot(x1 - x0, y1 - y0, z1 - z0) || 1, s = Math.min(0.6, l * 0.3) / l;
+    this.tracers.push({ x0: x0 + (x1 - x0) * s, y0: y0 + (y1 - y0) * s, z0: z0 + (z1 - z0) * s, x1, y1, z1, age: 0, life: 0.07 });
+  }
+
+  muzzle(x, y, z) {
+    this.emit(x, y, z, { life: 0.06, size: 0.55, grow: -2, r: 1, g: 0.85, b: 0.45, a: 1 });
+    this.emit(x, y, z, { vy: 0.4, life: 0.5, size: 0.25, grow: 0.8, r: 0.7, g: 0.7, b: 0.7, a: 0.25, drag: 2 });
+    this.flashes.push({ x, y, z, t: 0.05, k: 600 });
+  }
+
+  // Where a bullet lands: dust off walls and the road, sparks off cars, a red puff off people.
+  impact(x, y, z, kind) {
+    if (kind === 'vehicle') { this.sparks(x, y, z, 5); return; }
+    if (kind === 'ped' || kind === 'player') {
+      for (let i = 0; i < 4; i++) this.emit(x, y, z, { vx: (Math.random() - 0.5) * 1.5, vy: Math.random() * 1.2, vz: (Math.random() - 0.5) * 1.5, life: 0.35, size: 0.22, grow: 0.4, r: 0.55, g: 0.06, b: 0.06, a: 0.8, grav: 6 });
+      return;
+    }
+    if (!kind) return; // flew off into the distance
+    for (let i = 0; i < 3; i++) this.emit(x, y, z, { vx: (Math.random() - 0.5) * 1.2, vy: 0.4 + Math.random(), vz: (Math.random() - 0.5) * 1.2, life: 0.6, size: 0.3, grow: 0.9, r: 0.72, g: 0.69, b: 0.63, a: 0.5, drag: 2 });
+    if (kind === 'static') this.sparks(x, y, z, 2);
   }
 
   emit(x, y, z, opts) {
@@ -135,11 +173,24 @@ export class Effects {
     const g = this.points.geometry;
     g.setDrawRange(0, n);
     for (const a of ['position', 'color', 'size']) g.attributes[a].needsUpdate = true;
-    // brief light for explosions
+    // brief light for explosions and gunshots (the brightest one wins)
     let best = null;
-    for (const f of this.flashes) { f.t -= dt; if (!best || f.t > best.t) best = f; }
+    for (const f of this.flashes) { f.t -= dt; if (f.t > 0 && (!best || f.t * (f.k ?? 400) > best.t * (best.k ?? 400))) best = f; }
     this.flashes = this.flashes.filter((f) => f.t > 0);
-    if (best && best.t > 0) { this.light.position.set(best.x, best.y, best.z); this.light.intensity = best.t * 400; }
+    if (best) { this.light.position.set(best.x, best.y, best.z); this.light.intensity = best.t * (best.k ?? 400); }
     else this.light.intensity = 0;
+    // tracers fade out in a few frames
+    let k = 0;
+    this.tracers = this.tracers.filter((t) => (t.age += dt) < t.life);
+    for (const t of this.tracers) {
+      const a = 1 - t.age / t.life;
+      this.tPos.set([t.x0, t.y0, t.z0, t.x1, t.y1, t.z1], k * 6);
+      this.tCol.set([1, 0.93, 0.6, 0.95 * a, 1, 0.75, 0.35, 0.15 * a], k * 8);
+      k++;
+    }
+    const tg = this.tracerLines.geometry;
+    tg.setDrawRange(0, k * 2);
+    tg.attributes.position.needsUpdate = true;
+    tg.attributes.color.needsUpdate = true;
   }
 }

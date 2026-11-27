@@ -15,6 +15,10 @@ export const MODELS = {
   tasker: { name: 'Tasker', kind: 'pickup', len: 5.3, wid: 2.0, hgt: 1.75, accel: 7, top: 42, brake: 20, grip: 6, steer: 0.55, wb: 3.2, tough: 1.4 },
   haulmark: { name: 'Haulmark', kind: 'van', len: 5.6, wid: 2.1, hgt: 2.6, accel: 5.5, top: 36, brake: 18, grip: 5.5, steer: 0.5, wb: 3.4, tough: 1.8 },
   vireo: { name: 'Vireo GT', kind: 'sports', len: 4.4, wid: 1.96, hgt: 1.18, accel: 12.5, top: 64, brake: 30, grip: 9, steer: 0.55, wb: 2.6, tough: 0.8 },
+  // supercars: the Strand Motors range
+  halcyon: { name: 'Halcyon GT', kind: 'gt', len: 4.75, wid: 1.98, hgt: 1.25, accel: 13.5, top: 70, brake: 31, grip: 9.4, steer: 0.55, wb: 2.85, tough: 0.95 },
+  vantor: { name: 'Vantor S', kind: 'super', len: 4.55, wid: 2.04, hgt: 1.12, accel: 16, top: 80, brake: 34, grip: 10.5, steer: 0.56, wb: 2.7, tough: 0.85 },
+  volantis: { name: 'Volantis X', kind: 'hyper', len: 4.7, wid: 2.08, hgt: 1.08, accel: 19, top: 92, brake: 38, grip: 11.5, steer: 0.56, wb: 2.75, tough: 0.9 },
   interceptor: { name: 'Interceptor', kind: 'police', len: 4.9, wid: 1.92, hgt: 1.45, accel: 10.5, top: 58, brake: 28, grip: 8, steer: 0.58, wb: 2.9, tough: 1.6 },
   armored: { name: 'Strongbox', kind: 'armored', len: 6.0, wid: 2.3, hgt: 2.7, accel: 5, top: 34, brake: 16, grip: 5.5, steer: 0.48, wb: 3.6, tough: 4 },
 };

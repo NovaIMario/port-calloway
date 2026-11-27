@@ -41,6 +41,49 @@ test('police drive through the streets to a player on foot and arrest them', () 
   assert.ok(arrested !== null, `no arrest; closest unit got to ${closest.toFixed(1)} m`);
 });
 
+test('at three bars officers get out of their cars and open fire', () => {
+  const { world, police } = setup(3, 50);
+  // one car, just up the avenue
+  assert.ok(onRoad(city, 3, 90));
+  police.spawnUnit = () => null;
+  const v = world.addVehicle('interceptor', 3, 90, Math.PI, { driver: 'npc', locked: true });
+  v.ai = { kind: 'police', pts: [], i: 1, cruise: 30, replan: 0, stuck: 0, reverse: 0 };
+  police.setLevel(3);
+  let shots = 0, hits = 0, out = 0;
+  for (let t = 0; t < 30 && hits < 2; t += DT) {
+    world.update(DT, IDLE, 0);
+    for (const e of world.events) {
+      if (e.type === 'copsOut') out++;
+      if (e.type === 'shot' && e.by?.cop) shots++;
+      if (e.type === 'playerHurt') hits++;
+      if (e.type === 'arrested') police.bust = 0;
+    }
+    world.events.length = 0;
+  }
+  assert.ok(out > 0, 'nobody got out');
+  assert.ok(shots > 0 && hits > 0, `${shots} shots, ${hits} hits`);
+  assert.ok(world.player.health < 100);
+  // the car waits where it stopped while its crew is out
+  assert.ok(v.ai.deployed);
+  const x = v.x, z = v.z;
+  for (let t = 0; t < 10; t += DT) { world.player.health = 100; world.update(DT, IDLE, 0); world.events.length = 0; }
+  assert.ok(Math.hypot(v.x - x, v.z - z) < 1, `the empty police car rolled ${Math.hypot(v.x - x, v.z - z).toFixed(1)} m`);
+});
+
+test('violence in front of the police brings armed officers at two bars', () => {
+  const { world, police } = setup(3, 50);
+  const v = world.addVehicle('interceptor', 3, 75, Math.PI, { driver: 'npc' });
+  v.ai = { kind: 'patrol' };
+  const victim = { x: 3, z: 58, cop: false };
+  police.report({ type: 'gunfire', by: world.player, x: 3, z: 50 });
+  police.report({ type: 'pedKilled', by: world.player, ped: victim });
+  assert.ok(police.level >= 2, `level ${police.level}`);
+  assert.ok(police.armed());
+  police.clear();
+  assert.equal(police.level, 0);
+  assert.ok(!police.armed());
+});
+
 test('out of sight for long enough, the heat drops away', () => {
   const { world, police } = setup(3, 50);
   police.setLevel(1);

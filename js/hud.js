@@ -1,8 +1,19 @@
-// On-screen interface: cash, heat, clock, speed, minimap, full map, objectives and subtitles.
+// On-screen interface: cash, heat, clock, speed, weapon, crosshair, minimap, full map,
+// objectives and subtitles.
 import { LAND, CANAL, PIERS, POND, HALF_ROAD, N, line, DISTRICT_NAMES, isWater } from './city.js';
 import { SURFACE_COLORS } from './render/cityMesh.js';
+import { SHOP_COLORS, shopGlyph } from './render/markers.js';
 
 const $ = (id) => document.getElementById(id);
+
+// Weapon silhouettes for the HUD, in a 64 x 24 box.
+export const WEAPON_ICONS = {
+  fist: 'M22 6h16a4 4 0 0 1 4 4v6a6 6 0 0 1-6 6H26a6 6 0 0 1-6-6V9a3 3 0 0 1 2-3zM26 6v6M31 6v6M36 6v6',
+  pistol: 'M12 6h34v7H30l-3 10h-8l3-10H12z',
+  smg: 'M8 7h38v7h-8v4l2 5h-5l-3-9h-6l-3 7h-6l3-7H8zM46 9h8v3h-8z',
+  shotgun: 'M2 9h18v4l-7 7H3zM20 7h40v4H20zM30 11h16v5H30z',
+  rifle: 'M2 8h14v5l-6 7H3zM16 7h28v6H16zM26 13h5l3 8h-5zM44 9h17v2H44zM30 4h6v3h-6z',
+};
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 const MAP = { x0: LAND.x0 - 60, z0: LAND.z0 - 60, x1: LAND.x1 + 60, z1: 660, s: 1 };
 
@@ -38,7 +49,7 @@ export function renderCityMap(city) {
   return { canvas: c, ...MAP };
 }
 
-const BLIP = { mission: '#f2c230', target: '#ff5a4f', police: '#4f8cff', poi: '#ffffff', stunt: '#f2c230', friend: '#4fd18b' };
+const BLIP = { mission: '#f2c230', target: '#ff5a4f', police: '#4f8cff', poi: '#ffffff', stunt: '#f2c230', friend: '#4fd18b', ...SHOP_COLORS };
 
 export class Hud {
   constructor(city) {
@@ -53,6 +64,29 @@ export class Hud {
     this.lastHeat = -1;
     this.lastCash = null;
     this.cashShown = 0;
+    this.hurtLevel = 0;
+    this.mark = { t: 0, kind: '' };
+    this.lastWeapon = null;
+  }
+
+  // The red edge of the screen when you are hurt.
+  hurt(dmg) { this.hurtLevel = Math.min(1, this.hurtLevel + 0.25 + dmg / 30); }
+
+  // The crosshair flashes when a shot lands, and turns red for a kill.
+  hitMark(kind) { if (kind === 'kill' || this.mark.kind !== 'kill' || this.mark.t <= 0) this.mark = { t: kind === 'kill' ? 0.35 : 0.15, kind }; }
+
+  weapon(w, dt) {
+    const el = $('weapon');
+    el.hidden = !w;
+    if (!w) return;
+    if (this.lastWeapon !== w.id) {
+      this.lastWeapon = w.id;
+      $('weapon-icon').innerHTML = `<path d="${WEAPON_ICONS[w.id]}"${w.id === 'fist' ? ' fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"' : ''}/>`;
+      $('weapon-name').textContent = w.name;
+      el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap');
+    }
+    $('weapon-ammo').textContent = w.melee ? '' : w.reloading ? 'Reloading…' : `${w.mag} / ${w.ammo}`;
+    $('weapon-ammo').classList.toggle('low', !w.melee && w.mag === 0);
   }
 
   setObjective(text) { $('objective').textContent = text || ''; $('objective').hidden = !text; }
@@ -95,6 +129,23 @@ export class Hud {
       $('car-health').classList.toggle('low', v.health < 35);
     }
     $('player-health').style.width = Math.max(0, p.health) + '%';
+    $('player-health').classList.toggle('low', p.health < 30);
+    $('armour-bar').hidden = !(p.armour > 0);
+    $('player-armour').style.width = Math.max(0, p.armour || 0) + '%';
+    this.weapon(extra.weapon, dt);
+    // crosshair: small while a gun is drawn, open while aiming
+    const ch = $('crosshair');
+    ch.hidden = !extra.crosshair;
+    ch.classList.toggle('aim', extra.crosshair === 'aim');
+    this.mark.t -= dt;
+    ch.dataset.mark = this.mark.t > 0 ? this.mark.kind : '';
+    // who a shot would go to, without free aim
+    const tg = $('target'), t = extra.target;
+    tg.hidden = !t;
+    if (t) { tg.style.transform = `translate(${t.x.toFixed(0)}px, ${t.y.toFixed(0)}px)`; tg.classList.toggle('cop', t.cop); }
+    this.hurtLevel = Math.max(0, this.hurtLevel - dt * 1.4);
+    const low = p.health > 0 && p.health < 25 ? 0.35 + Math.sin(world.time * 5) * 0.1 : 0;
+    $('hurt').style.opacity = Math.max(this.hurtLevel, low).toFixed(2);
     $('prompt').hidden = !extra.prompt;
     if (extra.prompt) $('prompt').innerHTML = extra.prompt;
     $('radio').textContent = extra.radio || '';
@@ -133,12 +184,14 @@ export class Hud {
       const dx = b.x - p.x, dz = b.z - p.z;
       const max = (W / 2 - 10) / scale;
       const d = Math.hypot(dx, dz);
+      if (b.shop && d > max) continue; // shops only show when they are on the map
       const k = d > max ? max / d : 1;
       g.fillStyle = BLIP[b.kind] || '#fff';
       g.strokeStyle = 'rgba(0,0,0,0.7)';
       g.lineWidth = 2 / scale;
       g.beginPath();
-      g.arc(dx * k, dz * k, (b.big ? 7 : 5) / scale, 0, Math.PI * 2);
+      if (b.shop) { const r = 6 / scale; g.roundRect(dx * k - r, dz * k - r, r * 2, r * 2, r * 0.4); }
+      else g.arc(dx * k, dz * k, (b.big ? 7 : b.small ? 3.5 : 5) / scale, 0, Math.PI * 2);
       g.fill(); g.stroke();
     }
     g.restore();
@@ -176,8 +229,14 @@ export class Hud {
     for (const b of blips) {
       const [px, py] = P(b.x, b.z);
       g.fillStyle = BLIP[b.kind] || '#fff'; g.strokeStyle = '#111'; g.lineWidth = 2;
-      g.beginPath(); g.arc(px, py, (b.big ? 8 : 6) * devicePixelRatio, 0, Math.PI * 2); g.fill(); g.stroke();
-      if (b.label) { g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 4; g.strokeText(b.label, px, py - 12 * devicePixelRatio); g.fillText(b.label, px, py - 12 * devicePixelRatio); }
+      if (b.shop) {
+        // a rounded square with the shop's pictogram
+        const r = 10 * devicePixelRatio;
+        g.beginPath(); g.roundRect(px - r, py - r, r * 2, r * 2, r * 0.35); g.fill(); g.stroke();
+        g.save(); g.translate(px - r * 0.8, py - r * 0.8); shopGlyph(g, b.kind, (r * 1.6) / 128); g.restore();
+      } else { g.beginPath(); g.arc(px, py, (b.big ? 8 : 6) * devicePixelRatio, 0, Math.PI * 2); g.fill(); g.stroke(); }
+      const ly = py - (b.shop ? 15 : 12) * devicePixelRatio;
+      if (b.label) { g.fillStyle = '#fff'; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.lineWidth = 4; g.strokeText(b.label, px, ly); g.fillText(b.label, px, ly); }
     }
     const p = world.player, [px, py] = P(p.x, p.z);
     g.save(); g.translate(px, py); g.rotate(Math.PI - p.h);

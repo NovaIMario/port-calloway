@@ -14,7 +14,12 @@ const SHAPES = {
   van: { ride: 0.4, body: 1.95, cab: 0, cabF: 1.6, cabB: -2.6, slopeF: 0, slopeB: 0, wheel: 0.4, van: true },
   sports: { ride: 0.24, body: 0.48, cab: 0.48, cabF: 0.3, cabB: -1.45, slopeF: 0.95, slopeB: 0.8, wheel: 0.34, spoiler: true },
   armored: { ride: 0.45, body: 2.0, cab: 0, cabF: 1.8, cabB: -2.8, slopeF: 0, slopeB: 0, wheel: 0.45, van: true },
+  // supercars: low, wide, with the cabin pushed forward and wider tyres
+  gt: { ride: 0.25, body: 0.5, cab: 0.5, cabF: -0.05, cabB: -1.25, slopeF: 1.0, slopeB: 1.0, wheel: 0.36, tyre: 0.3, inset: 0.3, stripes: 0xf4f1ea },
+  super: { ride: 0.2, body: 0.44, cab: 0.46, cabF: 0.55, cabB: -0.75, slopeF: 1.05, slopeB: 1.25, wheel: 0.36, tyre: 0.32, inset: 0.36, wing: 0.16, intakes: true, splitter: true },
+  hyper: { ride: 0.18, body: 0.42, cab: 0.44, cabF: 0.7, cabB: -0.5, slopeF: 1.0, slopeB: 1.5, wheel: 0.37, tyre: 0.34, inset: 0.38, wing: 0.46, intakes: true, splitter: true },
 };
+const CARBON = 0x141518;
 
 function faceNormal(a, b, c) {
   const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
@@ -40,7 +45,7 @@ function modelGeometry(model) {
     glass.box(-hw - 0.01, y1 - 0.8, hl - 1.3, hw + 0.01, y1 - 0.25, hl - 0.25, 0xffffff, { top: false });
   } else {
     // Cabin: a prism whose front and back faces slope like a windscreen and rear window.
-    const cy0 = y1, cy1 = y1 + s.cab, w0 = hw - 0.08, w1 = hw - 0.22;
+    const cy0 = y1, cy1 = y1 + s.cab, w0 = hw - 0.08, w1 = hw - (s.inset ?? 0.22);
     const zf0 = s.cabF + s.slopeF, zf1 = s.cabF, zb0 = s.cabB - s.slopeB, zb1 = s.cabB;
     q(glass, [-w0, cy0, zf0], [w0, cy0, zf0], [w1, cy1, zf1], [-w1, cy1, zf1]);
     q(glass, [w0, cy0, zb0], [-w0, cy0, zb0], [-w1, cy1, zb1], [w1, cy1, zb1]);
@@ -56,13 +61,36 @@ function modelGeometry(model) {
   }
   if (s.spoiler) paint.box(-hw + 0.1, y1 + 0.25, -hl + 0.05, hw - 0.1, y1 + 0.32, -hl + 0.4);
   if (m.kind === 'taxi') paint.box(-0.35, y1 + s.cab + 0.07, -0.6, 0.35, y1 + s.cab + 0.35, -0.2, 0xffffff);
+  if (s.wing) {
+    // rear wing on two struts
+    const wy = y1 + s.wing;
+    trim.box(-hw + 0.06, wy, -hl + 0.02, hw - 0.06, wy + 0.06, -hl + 0.42, CARBON, { bottom: true });
+    for (const x of [-hw * 0.55, hw * 0.55]) trim.box(x - 0.03, y1, -hl + 0.15, x + 0.03, wy, -hl + 0.3, CARBON);
+    for (const x of [-hw + 0.06, hw - 0.08]) trim.box(x, wy - 0.08, -hl + 0.02, x + 0.02, wy + 0.1, -hl + 0.42, CARBON);
+  }
+  if (s.intakes) {
+    // side air intakes behind the doors, and a diffuser under the tail
+    for (const sx of [-1, 1]) trim.box(sx < 0 ? -hw - 0.025 : hw - 0.02, y0 + 0.1, -1.05, sx < 0 ? -hw + 0.02 : hw + 0.025, y1 - 0.06, -0.3, CARBON);
+    trim.box(-hw + 0.25, y0 - 0.04, -hl - 0.1, hw - 0.25, y0 + 0.08, -hl + 0.2, CARBON);
+  }
+  if (s.splitter) trim.box(-hw + 0.04, y0 - 0.07, hl - 0.15, hw - 0.04, y0 - 0.02, hl + 0.14, CARBON, { bottom: true });
+  if (s.stripes) {
+    // twin stripes over the bonnet, roof and boot
+    const top = y1 + s.cab + 0.071;
+    for (const sx of [-1, 1]) {
+      const x0 = sx < 0 ? -0.36 : 0.13, x1 = sx < 0 ? -0.13 : 0.36;
+      trim.box(x0, y1, s.cabF + s.slopeF, x1, y1 + 0.006, hl + 0.005, s.stripes);
+      trim.box(x0, top - 0.004, s.cabB, x1, top + 0.002, s.cabF, s.stripes);
+      trim.box(x0, y1, -hl - 0.005, x1, y1 + 0.006, s.cabB - s.slopeB, s.stripes);
+    }
+  }
   head.box(-hw + 0.12, y0 + 0.28, hl - 0.02, -hw + 0.5, y0 + 0.44, hl + 0.03, 0xffffff, { top: false });
   head.box(hw - 0.5, y0 + 0.28, hl - 0.02, hw - 0.12, y0 + 0.44, hl + 0.03, 0xffffff, { top: false });
   tail.box(-hw + 0.1, y0 + 0.3, -hl - 0.03, -hw + 0.48, y0 + 0.46, -hl + 0.02, 0xffffff, { top: false });
   tail.box(hw - 0.48, y0 + 0.3, -hl - 0.03, hw - 0.1, y0 + 0.46, -hl + 0.02, 0xffffff, { top: false });
   const out = {
     paint: paint.build(), trim: trim.build(), glass: glass.build(), head: head.build(), tail: tail.build(),
-    shape: s, wheel: new THREE.CylinderGeometry(s.wheel, s.wheel, 0.28, 12).rotateZ(Math.PI / 2),
+    shape: s, wheel: new THREE.CylinderGeometry(s.wheel, s.wheel, s.tyre ?? 0.28, 12).rotateZ(Math.PI / 2),
   };
   cache.set(model, out);
   return out;
