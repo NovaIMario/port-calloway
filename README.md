@@ -85,7 +85,7 @@ Let go of everything and the helicopter hovers; the plane keeps flying at cruise
 node --test
 ```
 
-There are 52 tests. They cover:
+There are 53 tests. They cover:
 
 - city generation: connectivity, no overlaps, places next to roads
 - driving physics

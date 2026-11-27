@@ -82,3 +82,22 @@ test('the Canal Leap clears the water when fast and ends in a splash when slow',
   assert.ok(fast.airTime > 1);
   assert.equal(attempt(14)?.type, 'splash');
 });
+
+test('running into a parked car stops you; a moving car knocks you over', async () => {
+  const { World } = await import('../js/world.js');
+  const world = new World(city);
+  const C = (o = {}) => ({ moveX: 0, moveY: 0, throttle: 0, brake: 0, steer: 0, handbrake: false, lift: 0, ...o });
+  world.spawnPlayer(-500, -440, 0);
+  const car = world.addVehicle('meridian', -500, -450, 0, {});
+  const p = world.player;
+  // sprint south (the camera faces -z) straight into the car's nose
+  for (let t = 0; t < 2.5; t += DT) world.update(DT, C({ moveY: 1, sprint: true }), Math.PI);
+  assert.equal(p.down, 0, 'still on your feet');
+  assert.ok(p.z > car.z + car.m.len / 2, 'and stopped at the bumper');
+  // now the car comes at you
+  world.spawnPlayer(-500, -432, 0);
+  Object.assign(car, { x: -500, z: -440, s: 12, speed: 12, vx: 0, vz: 12 });
+  let knocked = false;
+  for (let t = 0; t < 2 && !knocked; t += DT) { world.update(DT, C(), 0); knocked = p.down > 0; }
+  assert.ok(knocked, 'a car at speed knocks you down');
+});

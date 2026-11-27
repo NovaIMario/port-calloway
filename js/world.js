@@ -144,8 +144,9 @@ export class World {
       const u = dx * f.x + dz * f.z, s = dx * rt.x + dz * rt.z;
       const hl = v.m.len / 2 + 0.35, hw = v.m.wid / 2 + 0.35;
       if (Math.abs(u) > hl || Math.abs(s) > hw) continue;
-      const rel = Math.hypot(v.vx - p.vx, v.vz - p.vz);
-      if (rel > 4.5 && p.down === 0) this.knockDown(p, v.vx, v.vz, rel, v);
+      // only the car's own speed counts: running into a parked car just stops you
+      const carSpeed = Math.hypot(v.vx, v.vz);
+      if (carSpeed > 4.5 && p.down === 0) this.knockDown(p, v.vx, v.vz, carSpeed, v);
       const pu = hl - Math.abs(u), ps = hw - Math.abs(s);
       if (pu < ps) { p.x += f.x * Math.sign(u) * pu; p.z += f.z * Math.sign(u) * pu; }
       else { p.x += rt.x * Math.sign(s) * ps; p.z += rt.z * Math.sign(s) * ps; }
