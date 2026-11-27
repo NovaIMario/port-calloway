@@ -13,6 +13,10 @@ export const WEAPON_ICONS = {
   smg: 'M8 7h38v7h-8v4l2 5h-5l-3-9h-6l-3 7h-6l3-7H8zM46 9h8v3h-8z',
   shotgun: 'M2 9h18v4l-7 7H3zM20 7h40v4H20zM30 11h16v5H30z',
   rifle: 'M2 8h14v5l-6 7H3zM16 7h28v6H16zM26 13h5l3 8h-5zM44 9h17v2H44zM30 4h6v3h-6z',
+  bat: 'M4 11h22l27-4.5a5.5 5.5 0 0 1 0 11L26 13H4z',
+  sniper: 'M2 9h12v5l-5 7H3zM14 9h28v5H14zM42 10.5h20v2H42zM20 3h16v4H20zM24 7h2v2h-2zM31 7h2v2h-2zM27 14h4l2 6h-4z',
+  launcher: 'M4 8h46v8H4zM50 6.5l11 5.5-11 5.5zM18 16h5l2 6h-5zM32 16h4l1 4h-4zM24 3h8v5h-8z',
+  grenade: 'M23 14a9 9 0 1 0 18 0a9 9 0 1 0-18 0zM28 2h8v5h-8zM36 3l8-2v3l-8 2z',
 };
 const hex = (n) => '#' + n.toString(16).padStart(6, '0');
 const MAP = { x0: LAND.x0 - 60, z0: LAND.z0 - 60, x1: LAND.x1 + 60, z1: 660, s: 1 };
@@ -49,7 +53,7 @@ export function renderCityMap(city) {
   return { canvas: c, ...MAP };
 }
 
-const BLIP = { mission: '#f2c230', target: '#ff5a4f', police: '#4f8cff', poi: '#ffffff', stunt: '#f2c230', friend: '#4fd18b', ...SHOP_COLORS };
+const BLIP = { mission: '#f2c230', target: '#ff5a4f', police: '#4f8cff', poi: '#ffffff', stunt: '#f2c230', friend: '#4fd18b', air: '#7fd3ff', ...SHOP_COLORS };
 
 export class Hud {
   constructor(city) {
@@ -85,7 +89,7 @@ export class Hud {
       $('weapon-name').textContent = w.name;
       el.classList.remove('swap'); void el.offsetWidth; el.classList.add('swap');
     }
-    $('weapon-ammo').textContent = w.melee ? '' : w.reloading ? 'Reloading…' : `${w.mag} / ${w.ammo}`;
+    $('weapon-ammo').textContent = w.melee ? '' : w.thrown ? `× ${w.mag + w.ammo}` : w.reloading ? 'Reloading…' : `${w.mag} / ${w.ammo}`;
     $('weapon-ammo').classList.toggle('low', !w.melee && w.mag === 0);
   }
 
@@ -124,7 +128,7 @@ export class Hud {
     $('car-panel').hidden = !v;
     if (v) {
       $('speed').textContent = Math.round(v.speed * 3.6);
-      $('car-name').textContent = v.m.name;
+      $('car-name').textContent = v.m.air ? `${v.m.name} · ${Math.max(0, Math.round(v.alt ?? 0))} m up` : v.m.name;
       $('car-health').style.width = Math.max(0, v.health) + '%';
       $('car-health').classList.toggle('low', v.health < 35);
     }
@@ -136,6 +140,7 @@ export class Hud {
     // crosshair: small while a gun is drawn, open while aiming
     const ch = $('crosshair');
     ch.hidden = !extra.crosshair;
+    $('scope').hidden = !extra.scope;
     ch.classList.toggle('aim', extra.crosshair === 'aim');
     this.mark.t -= dt;
     ch.dataset.mark = this.mark.t > 0 ? this.mark.kind : '';
@@ -184,7 +189,7 @@ export class Hud {
       const dx = b.x - p.x, dz = b.z - p.z;
       const max = (W / 2 - 10) / scale;
       const d = Math.hypot(dx, dz);
-      if (b.shop && d > max) continue; // shops only show when they are on the map
+      if ((b.shop || b.local) && d > max) continue; // shops (and the like) only show when they are on the map
       const k = d > max ? max / d : 1;
       g.fillStyle = BLIP[b.kind] || '#fff';
       g.strokeStyle = 'rgba(0,0,0,0.7)';

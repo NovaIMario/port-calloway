@@ -6,6 +6,7 @@ import { buildProps } from './render/props.js';
 import { createVehicleMesh, updateVehicleMesh } from './render/vehicles.js';
 import { CrowdRenderer, PlayerView } from './render/people.js';
 import { PickupView } from './render/pickups.js';
+import { ProjectileView } from './render/projectiles.js';
 import { World } from './world.js';
 import { CameraRig } from './camera.js';
 import { Input } from './input.js';
@@ -33,6 +34,7 @@ async function boot() {
   const game = new Game({ world, hud, rig, gfx, props, meshes, input });
   const shopUI = new ShopUI(game);
   game.pickupView = new PickupView(gfx.scene);
+  game.projectileView = new ProjectileView(gfx.scene);
 
   const addView = (v) => { const view = createVehicleMesh(v); gfx.scene.add(view.root); views.set(v, view); };
   const dropView = (v) => { const view = views.get(v); if (view) { gfx.scene.remove(view.root); views.delete(v); } };
@@ -78,12 +80,14 @@ async function boot() {
   setupTouch(input);
 
   const STEP = 1 / 60;
-  let acc = 0, last = performance.now();
+  let acc = 0, last = performance.now(), lastMode = '';
   function frame(now) {
     requestAnimationFrame(frame);
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
-    const c = input.read(game.sensitivity, !world.player.vehicle);
+    const pv = world.player.vehicle, mode = pv ? pv.m.air || 'car' : 'foot';
+    const c = input.read(game.sensitivity, mode);
+    if (mode !== lastMode) { lastMode = mode; touchLabels(mode); }
     const inShop = shopUI.open;
     if (running && inShop) {
       // the shop has the keyboard; Escape (from outside the dialog) or B on a pad leaves
@@ -123,6 +127,15 @@ async function boot() {
     gfx.renderer.render(gfx.scene, gfx.camera);
   }
   requestAnimationFrame(frame);
+}
+
+// On touch screens, flying turns the Brake and Horn buttons into Up and Down.
+function touchLabels(mode) {
+  const air = mode === 'heli' || mode === 'plane';
+  const set = (k, a, b) => { const el = document.querySelector(`.tbtns button[data-t="${k}"]`); if (el) el.textContent = air ? a : b; };
+  set('brake', 'Up', 'Brake');
+  set('horn', 'Down', 'Horn');
+  set('enter', air ? 'Exit' : 'Car', 'Car');
 }
 
 function setupTouch(input) {

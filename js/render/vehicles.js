@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { Geo } from './geo.js';
 import { MODELS } from '../physics.js';
+import { createAircraftMesh, updateAircraftMesh } from './aircraft.js';
 
 const SHAPES = {
   hatch: { ride: 0.32, body: 0.58, cab: 0.62, cabF: 0.55, cabB: -1.75, slopeF: 0.75, slopeB: 0.25, wheel: 0.33 },
@@ -114,6 +115,7 @@ function paintMat(hex) {
 }
 
 export function createVehicleMesh(v) {
+  if (v.m.air) return createAircraftMesh(v);
   const G = modelGeometry(v.model);
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -149,6 +151,7 @@ export function createVehicleMesh(v) {
 
 const dark = new THREE.Color(0x222222);
 export function updateVehicleMesh(view, v, t) {
+  if (view.air) return updateAircraftMesh(view, v, t);
   view.root.position.set(v.x, v.y, v.z);
   view.root.rotation.y = v.h;
   view.body.rotation.x = -v.pitch;

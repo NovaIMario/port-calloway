@@ -111,3 +111,22 @@ test('cars: bought at the dealer, kept at the lock-up, resprayed there', () => {
   assert.notEqual(p.garage[0].color, vantor.colors[0]);
   assert.equal(p.cash, 20000 - vantor.price - RESPRAY_PRICE);
 });
+
+test('the gun shop also has a bat, a sniper rifle, a launcher and grenades', () => {
+  const { p, combat } = setup(30000);
+  const s = shopOf('guns');
+  const ids = shopItems(s, p).map((r) => r.id);
+  for (const id of ['buy:bat', 'buy:sniper', 'buy:launcher', 'buy:grenade']) assert.ok(ids.includes(id), id);
+  let r = purchase(s, 'buy:grenade', p);
+  assert.ok(r.ok);
+  assert.deepEqual(r.give, { id: 'grenade', rounds: 5 });
+  combat.give(r.give.id, r.give.rounds);
+  const more = shopItems(s, p).find((q) => q.id === 'ammo:grenade');
+  assert.equal(more.name, 'Grenades ×5');
+  assert.equal(more.desc, 'You have 5 grenades.');
+  r = purchase(s, 'buy:bat', p);
+  assert.ok(r.ok);
+  combat.give('bat');
+  assert.ok(!shopItems(s, p).some((q) => q.id.endsWith(':bat')), 'a bat you own is not on sale again');
+  assert.equal(p.cash, 30000 - PRICES.grenade - PRICES.bat);
+});

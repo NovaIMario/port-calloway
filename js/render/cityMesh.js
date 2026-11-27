@@ -7,7 +7,7 @@ import { mulberry32, randInt } from '../util.js';
 
 export const SURFACE_COLORS = {
   grass: 0x7fae5c, sand: 0xf0dcaa, paving: 0xd8d3c6, asphalt: 0x65686c, concrete: 0xbab7ae,
-  path: 0xe4d4b0, boards: 0xc4a27a, pool: 0x5fd0ee,
+  path: 0xe4d4b0, boards: 0xc4a27a, pool: 0x5fd0ee, runway: 0x4c4f53, pad: 0x8d9196, mark: 0xf2f2ee,
 };
 
 export function buildCityMeshes(city, scene) {
@@ -50,7 +50,7 @@ export function buildCityMeshes(city, scene) {
 
   // Surfaces laid on top of the slabs.
   const surf = new Geo();
-  const order = { path: 0.03, pool: 0.035, boards: 0.012 };
+  const order = { path: 0.03, pool: 0.035, boards: 0.012, runway: 0.022, pad: 0.022, mark: 0.03 };
   for (const s of city.surfaces) surf.flat(s.x0, s.z0, s.x1, s.z1, CURB + (order[s.kind] ?? 0.015), SURFACE_COLORS[s.kind], 6);
   const surfMesh = new THREE.Mesh(surf.build(), new THREE.MeshLambertMaterial({ map: noise, vertexColors: true }));
   surfMesh.receiveShadow = true;

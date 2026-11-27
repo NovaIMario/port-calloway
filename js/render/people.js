@@ -17,7 +17,8 @@ const PARTS = {
 };
 const NAMES = Object.keys(PARTS);
 const HAND = [0, -0.6, 0]; // where a gun sits, from the shoulder of a straight arm
-const PUNCH = 0.28;
+const PUNCH = WEAPONS.fist.swing, BAT_SWING = WEAPONS.bat.swing;
+const HELD = ['bat', 'pistol', 'smg', 'shotgun', 'rifle', 'sniper', 'launcher', 'grenade'];
 
 // Arm angles. 'armL' is the person's right arm (it holds the gun); 'armR' the left.
 // Pose fields: swing, armsUp, armed, twoHand, aiming (or aim, for the police), aimPitch, punchT.
@@ -25,7 +26,12 @@ function armAngles(name, p) {
   const swing = p.swing || 0, gunArm = name === 'armL';
   const raised = p.armed && (p.aiming || p.aim || p.shotT > 0);
   const pitch = p.aimPitch || 0;
-  if (gunArm && p.punchT > 0) return [-1.55 * Math.sin(Math.PI * (1 - p.punchT / PUNCH)), 0.12];
+  if (gunArm && p.punchT > 0) {
+    // the bat comes down from over the shoulder; a grenade goes overarm
+    if (p.weapon === 'bat') { const t = Math.sin((1 - p.punchT / BAT_SWING) * Math.PI / 2); return [-3.5 + 2.6 * t, 0.45 - 0.5 * t]; }
+    if (p.weapon === 'grenade') { const t = 1 - p.punchT / PUNCH; return [-3.6 + 2.1 * t, 0.15]; }
+    return [-1.55 * Math.sin(Math.PI * (1 - p.punchT / PUNCH)), 0.12];
+  }
   if (raised) {
     if (gunArm) return [-1.5 + pitch, p.twoHand ? 0 : 0.08];
     if (p.twoHand) return [-1.3 + pitch, -0.75];
@@ -109,6 +115,31 @@ export class CrowdRenderer {
 }
 
 // The player: same blocky person, as a group of ordinary meshes, with whatever they are holding.
+// A ram-air canopy: five cells in an arc, red and white, with lines down to the shoulders.
+function parachute() {
+  const g = new THREE.Group();
+  const red = new THREE.MeshLambertMaterial({ color: 0xd8432f }), white = new THREE.MeshLambertMaterial({ color: 0xf2efe6 });
+  for (let i = -2; i <= 2; i++) {
+    const cell = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.28, 2.1), i % 2 ? white : red);
+    cell.position.set(i * 0.86, 4.3 - i * i * 0.14, 0);
+    cell.rotation.z = -i * 0.16;
+    cell.castShadow = true;
+    g.add(cell);
+  }
+  const line = new THREE.MeshBasicMaterial({ color: 0x333333 });
+  for (const sx of [-1, 1]) {
+    for (const z of [-0.7, 0.7]) {
+      const a = new THREE.Vector3(sx * 0.25, 1.6, 0), b = new THREE.Vector3(sx * 1.9, 3.85, z);
+      const l = new THREE.Mesh(new THREE.BoxGeometry(0.02, a.distanceTo(b), 0.02), line);
+      l.position.copy(a).add(b).multiplyScalar(0.5);
+      l.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
+      g.add(l);
+    }
+  }
+  g.visible = false;
+  return g;
+}
+
 export class PlayerView {
   constructor(scene, look) {
     this.group = new THREE.Group();
@@ -128,7 +159,7 @@ export class PlayerView {
     this.collarAt = new THREE.Matrix4().makeTranslation(0, 1.58, 0);
     this.group.add(collar);
     this.guns = {};
-    for (const id of ['pistol', 'smg', 'shotgun', 'rifle']) {
+    for (const id of HELD) {
       const g = new THREE.Mesh(gunGeometry(id), gunMaterial);
       g.castShadow = true;
       g.matrixAutoUpdate = false;
@@ -137,6 +168,8 @@ export class PlayerView {
       this.guns[id] = g;
     }
     this.tmp = { local: new THREE.Matrix4(), off: new THREE.Matrix4(), body: new THREE.Matrix4(), euler: new THREE.Euler() };
+    this.chute = parachute();
+    this.group.add(this.chute);
     scene.add(this.group);
   }
 
@@ -153,18 +186,26 @@ export class PlayerView {
   }
 
   update(p) {
-    this.group.visible = !p.hidden;
-    if (p.hidden) return;
+    // hidden in a vehicle, and while looking down a scope (the camera is in your head)
+    this.group.visible = !p.hidden && !p.scoped;
+    if (!this.group.visible) return;
     this.group.position.set(p.x, p.y, p.z);
     this.group.rotation.y = p.h;
     const W = WEAPONS[p.weapon] || WEAPONS.fist;
-    const pose = { ...p, x: 0, y: 0, z: 0, h: 0, armed: !W.melee, twoHand: !!W.twoHand };
+    const pose = { ...p, x: 0, y: 0, z: 0, h: 0, armed: !W.melee && !p.chute, twoHand: !!W.twoHand };
+    // under a parachute: hands up on the lines, the canopy opening out above
+    this.chute.visible = !!p.chute;
+    if (p.chute) {
+      pose.armsUp = true;
+      const k = Math.max(0.05, Math.min(1, p.chute * 1.6));
+      this.chute.scale.set(k, k, k);
+    }
     if (!p.aiming) pose.aimPitch = 0;
     bodyMatrix(pose, this.tmp.body, this.tmp);
     for (const n of NAMES) partMatrix(n, pose, this.parts[n].matrix, this.tmp);
     this.collar.matrix.copy(this.tmp.body).multiply(this.collarAt);
     for (const [id, g] of Object.entries(this.guns)) {
-      g.visible = id === p.weapon && p.down === 0;
+      g.visible = id === p.weapon && p.down === 0 && !p.chute;
       if (g.visible) partMatrix('armL', pose, g.matrix, this.tmp, HAND);
     }
   }

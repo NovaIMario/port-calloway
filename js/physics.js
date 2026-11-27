@@ -21,6 +21,11 @@ export const MODELS = {
   volantis: { name: 'Volantis X', kind: 'hyper', len: 4.7, wid: 2.08, hgt: 1.08, accel: 19, top: 92, brake: 38, grip: 11.5, steer: 0.56, wb: 2.75, tough: 0.9 },
   interceptor: { name: 'Interceptor', kind: 'police', len: 4.9, wid: 1.92, hgt: 1.45, accel: 10.5, top: 58, brake: 28, grip: 8, steer: 0.58, wb: 2.9, tough: 1.6 },
   armored: { name: 'Strongbox', kind: 'armored', len: 6.0, wid: 2.3, hgt: 2.7, accel: 5, top: 34, brake: 16, grip: 5.5, steer: 0.48, wb: 3.6, tough: 4 },
+  // aircraft (see aircraft.js): accel is m/s² of forward speed, steer the turn rate in rad/s
+  skylark: { name: 'Skylark', kind: 'heli', air: 'heli', len: 9.4, wid: 2.3, hgt: 3.1, accel: 7, top: 42, steer: 1.4, wb: 3, tough: 1.1 },
+  // thrust is m/s² at full throttle, stall the speed below which the wings stop flying, vr the
+  // take-off speed; wingY is the height of the (high) wing
+  gull: { name: 'Gull', kind: 'plane', air: 'plane', len: 7.6, wid: 1.6, hgt: 2.6, top: 72, thrust: 6, stall: 24, vr: 22, span: 10.6, wingY: 2.05, wb: 2, tough: 0.9 },
 };
 
 const SURFACE_GRIP = { road: 1, curb: 0.95, grass: 0.7, sand: 0.55 };
@@ -31,8 +36,10 @@ export function createVehicle(model, x, z, h, opts = {}) {
   return {
     id: nextId++, model, m, x, z, y: opts.y ?? 0, h, vx: 0, vz: 0, vy: 0, spin: 0, steer: 0,
     health: 100, airborne: false, airTime: 0, sinking: 0, pitch: 0, roll: 0, slip: 0, speed: 0,
-    input: { throttle: 0, brake: 0, steer: 0, handbrake: false },
-    color: opts.color ?? 0xb0b0b0, driver: null, siren: false, alarm: 0, wheelSpin: 0, ...opts,
+    input: { throttle: 0, brake: 0, steer: 0, handbrake: false, fwd: 0, yaw: 0, lift: 0, bank: 0, pitch: 0 },
+    color: opts.color ?? 0xb0b0b0, driver: null, siren: false, alarm: 0, wheelSpin: 0,
+    ...(m.air ? { grounded: true, rotor: 0, blade: 0, thr: 0, s: 0, w: 0, alt: 0 } : {}),
+    ...opts,
   };
 }
 

@@ -78,6 +78,10 @@ export class Police {
       case 'carShot':
         if (e.v.model === 'interceptor') { this.crime(90, x, z, { force: true }); angry(40); }
         break;
+      case 'blast': // a rocket or a grenade going off
+        this.crime(130, x, z, { callChance: 0.8 });
+        if (this.canSee(x, z, 90)) angry(50);
+        break;
       case 'robbery': // the clerk hits the alarm
         this.crime(160, x, z, { force: true });
         angry(40);
@@ -304,15 +308,17 @@ export class Police {
     const armed = this.armed();
     o.armed = armed || this.level >= 2;
     if (pl.health <= 0) { o.speed = 0; o.swing = 0; return; }
-    const see = d < 50 && this.clearLine(o.x, o.z, pl.x, pl.z);
-    if (armed && see && d < 28) {
+    // high up in a helicopter (or on a roof) is a long way off for a pistol
+    const d3 = Math.hypot(d, pl.y - o.y);
+    const see = d3 < 50 && this.clearLine(o.x, o.z, pl.x, pl.z);
+    if (armed && see && d3 < 28) {
       // stand, face the player and fire in short bursts
       o.speed = 0; o.swing = 0;
       o.h = lerpAngle(o.h, Math.atan2(dx, dz), 1 - Math.exp(-10 * dt));
       o.aim = true;
       o.fireT -= dt;
       if (o.fireT <= 0) {
-        this.shoot(o, d);
+        this.shoot(o, d3);
         o.burst -= 1;
         if (o.burst > 0) o.fireT = 0.25 + this.r() * 0.15;
         else { o.burst = 2 + Math.floor(this.r() * 3); o.fireT = 0.9 + this.r() * 1.0; }
@@ -378,11 +384,13 @@ export class Police {
 
   arrestCheck(dt) {
     const w = this.world, pl = w.player;
-    if (this.level === 0 || pl.down || pl.health <= 0) { this.bust = Math.max(0, this.bust - dt); return; }
+    // nobody is arrested in mid-air, under a parachute or out of reach on a roof
+    const up = pl.chute || (pl.vehicle?.m.air && !pl.vehicle.grounded);
+    if (this.level === 0 || pl.down || pl.health <= 0 || up) { this.bust = Math.max(0, this.bust - dt); return; }
     const slow = pl.vehicle ? pl.vehicle.speed < 1.5 : pl.speed < 2.5;
-    const nearCar = this.units().some((v) => !v.wrecked && Math.hypot(v.x - pl.x, v.z - pl.z) < (pl.vehicle ? 7.5 : 5.5) && v.speed < 6);
+    const nearCar = this.units().some((v) => !v.wrecked && Math.hypot(v.x - pl.x, v.z - pl.z) < (pl.vehicle ? 7.5 : 5.5) && v.speed < 6 && Math.abs(v.y - pl.y) < 3);
     const reach = pl.vehicle ? pl.vehicle.m.len / 2 + 1.4 : 1.8;
-    const nearCop = this.officers().some((o) => !o.dead && !o.down && Math.hypot(o.x - pl.x, o.z - pl.z) < reach);
+    const nearCop = this.officers().some((o) => !o.dead && !o.down && Math.hypot(o.x - pl.x, o.z - pl.z) < reach && Math.abs(o.y - pl.y) < 2);
     if (slow && (nearCar || nearCop)) this.bust += dt; else this.bust = Math.max(0, this.bust - dt * 2);
     if (this.bust > (pl.vehicle ? 2.6 : 1.4)) {
       this.bust = 0;

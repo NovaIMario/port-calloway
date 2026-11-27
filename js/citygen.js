@@ -72,7 +72,7 @@ export function generateCity(seed = 1912) {
       b.antenna = r() < 0.5;
     }
     city.buildings.push(b);
-    city.colliders.push({ type: 'box', x0: rect.x0, z0: rect.z0, x1: rect.x1, z1: rect.z1, h, kind: 'building' });
+    for (const t of b.tiers) city.colliders.push({ type: 'box', x0: t.x0, z0: t.z0, x1: t.x1, z1: t.z1, h: t.y1, kind: 'building' });
     return b;
   };
   const addTree = (x, z, kind = 'round', s = rand(r, 0.85, 1.25)) => {
@@ -198,6 +198,7 @@ export function generateCity(seed = 1912) {
   buildCoast(city, r, addTree, addBuilding);
   buildStreetFurniture(city, r, addTree);
   buildRamps(city);
+  buildAirfield(city);
   for (const s of SHOP_SITES) shopFront(city, regionAt(s.c, s.r), s);
   city.pickupSpots.push(...PICKUP_SPOTS.map((p) => ({ ...p, y: heightAt(city, p.x, p.z) ?? CURB })));
   city.pois.ferry = { x: -20, z: 560, h: Math.PI, name: 'Ferry Terminal', road: { x: -20, z: 512 } };
@@ -224,6 +225,10 @@ const PICKUP_SPOTS = [
   { kind: 'weapon', weapon: 'rifle', amount: 60, x: 548, z: -508 },    // at the foot of the lighthouse
   { kind: 'armour', amount: 100, x: 0, z: -300 },                      // the middle of Ferris Park
   { kind: 'cash', amount: 500, x: 100, z: 615, respawn: 600 },          // the end of the east pier
+  { kind: 'weapon', weapon: 'bat', x: -40, z: -300 },                   // left in Ferris Park after a game
+  { kind: 'weapon', weapon: 'grenade', amount: 5, x: -380, z: 385, respawn: 240 }, // the Works yard
+  { kind: 'weapon', weapon: 'sniper', amount: 10, x: -525, z: -150, respawn: 300 }, // up on the West Cliffs
+  { kind: 'weapon', weapon: 'launcher', amount: 3, x: 100, z: 488, respawn: 420 },  // behind the dock containers
 ];
 
 function shopFront(city, g, spec) {
@@ -424,6 +429,39 @@ function buildRamps(city) {
   city.trees = city.trees.filter((t, i) => (clear(t.x, t.z) ? (removed.add(i), false) : true));
   let k = 0;
   city.colliders = city.colliders.filter((c) => (c.kind === 'tree' ? !removed.has(k++) : true));
+}
+
+// The airstrip along the North Shore and the heliport out on the west pier. Planes and helicopters
+// wait there, unlocked: anyone can take one up.
+export const RUNWAY = { x0: -395, x1: 15, z0: -532, z1: -518 };
+export const HELIPADS = [{ x: -160, z: 568 }, { x: -160, z: 604 }];
+function buildAirfield(city) {
+  const R = RUNWAY, zc = (R.z0 + R.z1) / 2;
+  const apron = { x0: R.x0 - 40, x1: R.x0, z0: R.z0 - 2, z1: R.z1 + 2 };
+  const near = (x, z) => x > apron.x0 - 12 && x < R.x1 + 12 && z > R.z0 - 9 && z < R.z1 + 9;
+  const removed = new Set();
+  city.trees = city.trees.filter((t, i) => (near(t.x, t.z) ? (removed.add(i), false) : true));
+  let k = 0;
+  city.colliders = city.colliders.filter((c) => (c.kind === 'tree' ? !removed.has(k++) : true));
+  city.surfaces.push({ ...apron, kind: 'concrete' }, { ...R, kind: 'runway' });
+  // markings: threshold bars at each end and a dashed centre line
+  for (const [x0, dir] of [[R.x0 + 3, 1], [R.x1 - 3, -1]]) {
+    for (let i = 0; i < 6; i++) {
+      const z = R.z0 + 1.6 + i * 2.2 + (i >= 3 ? 0.8 : 0);
+      city.surfaces.push({ x0: Math.min(x0, x0 + dir * 14), x1: Math.max(x0, x0 + dir * 14), z0: z, z1: z + 1.1, kind: 'mark' });
+    }
+  }
+  for (let x = R.x0 + 26; x < R.x1 - 30; x += 24) city.surfaces.push({ x0: x, x1: x + 12, z0: zc - 0.3, z1: zc + 0.3, kind: 'mark' });
+  city.runway = R;
+  city.pois.airstrip = { x: R.x0 + 10, z: zc, h: Math.PI / 2, name: 'North Shore Airstrip', road: { x: R.x0 + 10, z: -500 } };
+  for (const [x, color] of [[R.x0 + 12, 0xe8e4da], [apron.x0 + 14, 0xb8312f]]) city.parking.push({ x, z: zc, h: Math.PI / 2, aircraft: 'gull', color });
+  // helipads: a pale square with a big H on it
+  for (const [i, p] of HELIPADS.entries()) {
+    city.surfaces.push({ x0: p.x - 8, x1: p.x + 8, z0: p.z - 8, z1: p.z + 8, kind: 'pad' });
+    city.surfaces.push({ x0: p.x - 3, x1: p.x - 2, z0: p.z - 4, z1: p.z + 4, kind: 'mark' }, { x0: p.x + 2, x1: p.x + 3, z0: p.z - 4, z1: p.z + 4, kind: 'mark' }, { x0: p.x - 2, x1: p.x + 2, z0: p.z - 0.5, z1: p.z + 0.5, kind: 'mark' });
+    city.parking.push({ x: p.x, z: p.z, h: Math.PI, aircraft: 'skylark', color: i ? 0xd7a43b : 0xf4f4f4 });
+  }
+  city.pois.heliport = { x: HELIPADS[0].x, z: HELIPADS[0].z, h: Math.PI, name: 'Pier Heliport', road: { x: -160, z: 512 } };
 }
 
 export function rampHeight(rp, x, z) {

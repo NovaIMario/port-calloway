@@ -11,9 +11,10 @@ Everything is original and generated in code: the city, the cars, the people, th
 - **A procedural city** of about 1.1 km × 1.1 km with eight districts: Downtown, Midtown, Old Town, the docks, Hillside, the Strand, Westgate Works and the Ferry Piers. It also has a canal with bridges, a park with a pond, an arena, a lighthouse and piers.
 - **Arcade driving physics** with a bicycle model, grip and drift, handbrake slides, jumps off six stunt ramps, damage, fires and explosions, and cars that sink in the harbour. There are twelve vehicle models, from the Corso hatchback to the Strongbox armoured truck.
 - **Supercars.** The Halcyon GT, the winged Vantor S and the Volantis X hypercar. Now and then one turns up in traffic or parked on the street. Otherwise you can buy one.
-- **Fists and guns.** Punch, or shoot with a pistol, an SMG, a pump shotgun or a carbine. Hip fire locks on to whoever is in front of you. Hold aim for an over-the-shoulder view where you aim with the mouse. Headshots do more damage. You can shoot a pistol or SMG out of a car window. Each gun has a magazine and reloads. Body armour soaks up damage before your health does.
+- **Nine weapons.** Fists, a baseball bat, a pistol, an SMG, a pump shotgun, a carbine, a scoped sniper rifle, a rocket launcher and grenades. Hip fire locks on to whoever is in front of you. Hold aim for an over-the-shoulder view where you aim with the mouse; with the sniper rifle, aiming looks down the scope. Headshots do more damage. Rockets and grenades explode: they knock people flat, wreck cars and set off the cars around them. You can shoot a pistol or SMG out of a car window. Guns reload by themselves when the magazine runs dry. Body armour soaks up damage before your health does.
+- **A helicopter and a plane.** Two Skylark helicopters wait at the Pier Heliport on the west pier, and two Gull light planes at the North Shore Airstrip. Anyone can take one up. The helicopter can land anywhere flat, rooftops included, and you can get out and walk about up there. The plane takes off from the runway at about 80 km/h; fly too slowly and it stalls. Jump out high up and a parachute opens. A long fall opens one too.
 - **Shops.** Walk into a lit doorway to go in:
-  - **Gunwale Arms** (two of them) sells guns, ammo and armour.
+  - **Gunwale Arms** (two of them) sells every weapon except fists, plus ammo and armour.
   - **Night Owl** corner shops (three) sell food that heals you. Show a gun and you can rob the till instead.
   - **Threadline** sells outfits.
   - **Strand Motors** sells performance cars.
@@ -38,20 +39,31 @@ Everything is original and generated in code: the city, the cars, the people, th
 | W A S D | drive or walk |
 | Space | handbrake, or jump on foot |
 | Shift | sprint |
-| F | get in or out of a car |
+| F | get in or out of a car, helicopter or plane |
 | Mouse | look around |
 | Left click | shoot or punch |
 | Right click (hold) | aim; in a car, lean out to shoot |
-| 1–5, mouse wheel, Tab | change weapon (1 fists, 2 pistol, 3 SMG, 4 shotgun, 5 carbine) |
+| 1–8, mouse wheel, Tab | change weapon (1 fists or bat, 2 pistol, 3 SMG, 4 shotgun, 5 carbine, 6 sniper rifle, 7 launcher, 8 grenades) |
 | R | reload on foot, or change radio station in a car |
 | C | camera distance |
 | H | horn |
 | M | map |
 | Esc | pause, or leave a shop |
 
-**Gamepad.** On foot, LT aims, RT shoots, X reloads, and RB or the d-pad changes weapon. In a car, hold B to aim and press X to shoot.
+**Flying.**
 
-**Touch.** Use the fire button to shoot. The gun button changes weapon.
+| Key | Helicopter | Plane |
+| --- | --- | --- |
+| W / S | forward / back | throttle up / slow down (brakes on the ground) |
+| A / D | turn | bank left / right |
+| Space | climb | nose up |
+| Shift | descend | nose down |
+
+Let go of everything and the helicopter hovers; the plane keeps flying at cruise power.
+
+**Gamepad.** On foot, LT aims, RT shoots, X reloads, and RB or the d-pad changes weapon. In a car, hold B to aim and press X to shoot. In a helicopter, RT climbs, LT descends and the left stick flies it. In a plane, RT is the throttle, LT slows down, and the left stick pitches (pull back to climb) and banks.
+
+**Touch.** Use the fire button to shoot. The gun button changes weapon. When flying, the Brake and Horn buttons become Up and Down.
 
 ## How it's built
 
@@ -59,6 +71,7 @@ Everything is original and generated in code: the city, the cars, the people, th
 - The simulation runs at a fixed 60 Hz, separate from rendering. That code is pure JavaScript with no three.js imports, so it runs and is tested in Node:
   - `city.js` / `citygen.js`: road grid, districts, buildings, props, colliders
   - `physics.js`: vehicle dynamics and collisions against a spatial grid
+  - `aircraft.js`: helicopter and plane flight, landings and crashes
   - `traffic.js`, `peds.js`, `police.js`: AI
   - `combat.js`: weapons, ray casts against people, cars and buildings, damage and pickups
   - `shops.js`: what each shop sells and what buying does. `shopui.js` draws the shop menu.
@@ -72,13 +85,14 @@ Everything is original and generated in code: the city, the cars, the people, th
 node --test
 ```
 
-There are 39 tests. They cover:
+There are 52 tests. They cover:
 
 - city generation: connectivity, no overlaps, places next to roads
 - driving physics
 - traffic following lanes and obeying lights
 - police chases, arrests and officers on foot
-- combat: ray hits, damage, reloads, shotguns, headshots, armour
+- combat: ray hits, damage, reloads, shotguns, headshots, armour, the bat, rockets, grenades and the sniper scope
+- flying: take-off, hovering, landing on roofs, parachutes, plane landings and crashes
 - shops: purchases, robberies, cars and where things are placed
 - missions playing through to completion or failure
 

@@ -11,9 +11,9 @@ export const SHOP_INFO = {
   garage: { title: "Bea's lock-up", tag: 'Your cars, kept safe. Bea will respray them too.' },
 };
 
-export const PRICES = { pistol: 450, smg: 1400, shotgun: 2100, rifle: 3800 };
-export const AMMO_PRICES = { pistol: 60, smg: 110, shotgun: 90, rifle: 160 };
-export const AMMO_CAP = { pistol: 240, smg: 480, shotgun: 96, rifle: 480 };
+export const PRICES = { bat: 80, pistol: 450, smg: 1400, shotgun: 2100, rifle: 3800, sniper: 5200, launcher: 9500, grenade: 300 };
+export const AMMO_PRICES = { pistol: 60, smg: 110, shotgun: 90, rifle: 160, sniper: 150, launcher: 450, grenade: 300 };
+export const AMMO_CAP = { pistol: 240, smg: 480, shotgun: 96, rifle: 480, sniper: 60, launcher: 12, grenade: 25 };
 export const ARMOUR_PRICE = 300;
 export const RESPRAY_PRICE = 150;
 export const ROBBERY_CLOSES = 240; // seconds a robbed shop stays shut
@@ -50,12 +50,13 @@ const totalAmmo = (a) => (a ? a.mag + a.ammo : 0);
 export function shopItems(shop, p, ctx = {}) {
   const rows = [];
   if (shop.kind === 'guns') {
-    for (const id of GUNS) {
+    for (const id of ['bat', ...GUNS]) {
       const W = WEAPONS[id], a = p.arms[id];
       if (!a) rows.push({ id: `buy:${id}`, name: `${W.name}: ${W.model}`, desc: describe(W), price: PRICES[id], label: 'Buy' });
-      else {
-        const full = totalAmmo(a) >= AMMO_CAP[id];
-        rows.push({ id: `ammo:${id}`, name: `${W.name} ammo ×${W.pack}`, desc: `You have ${totalAmmo(a)} rounds.`, price: AMMO_PRICES[id], label: full ? 'Full' : 'Buy', disabled: full });
+      else if (!W.melee) {
+        const full = totalAmmo(a) >= AMMO_CAP[id], unit = W.ammoName ?? 'rounds';
+        const name = W.thrown ? `${W.name} ×${W.pack}` : `${W.name} ${W.ammoName ?? 'ammo'} ×${W.pack}`;
+        rows.push({ id: `ammo:${id}`, name, desc: `You have ${totalAmmo(a)} ${unit}.`, price: AMMO_PRICES[id], label: full ? 'Full' : 'Buy', disabled: full });
       }
     }
     rows.push({ id: 'armour', name: 'Body armour', desc: 'Soaks up 100 points of damage before your health.', price: ARMOUR_PRICE, label: p.armour >= 100 ? 'Wearing it' : 'Buy', disabled: p.armour >= 100 });
@@ -88,6 +89,7 @@ export function shopItems(shop, p, ctx = {}) {
 }
 
 function describe(W) {
+  if (W.desc) return W.desc;
   const fire = W.pellets ? `${W.pellets} pellets a shot` : W.auto ? 'automatic' : 'semi-automatic';
   return `${fire}, ${W.mag}-round magazine, comes with ${W.start} rounds.`;
 }
@@ -108,12 +110,16 @@ export function purchase(shop, id, p, ctx = {}) {
   const pay = () => { if (row.price) p.cash -= row.price; };
   const [kind, arg] = id.split(':');
   switch (kind) {
-    case 'buy': pay(); return { ok: true, give: { id: arg, rounds: WEAPONS[arg].start }, msg: `Bought the ${WEAPONS[arg].name.toLowerCase()} for ${money(row.price)}.` };
+    case 'buy': {
+      pay();
+      const W = WEAPONS[arg];
+      return { ok: true, give: { id: arg, rounds: W.start }, msg: W.thrown ? `Bought ${W.start} ${W.name.toLowerCase()} for ${money(row.price)}.` : `Bought the ${W.name.toLowerCase()} for ${money(row.price)}.` };
+    }
     case 'ammo': {
       pay();
-      const a = p.arms[arg];
-      const add = Math.min(WEAPONS[arg].pack, AMMO_CAP[arg] - totalAmmo(a));
-      return { ok: true, give: { id: arg, rounds: add }, msg: `${add} rounds for the ${WEAPONS[arg].name.toLowerCase()}.` };
+      const a = p.arms[arg], W = WEAPONS[arg];
+      const add = Math.min(W.pack, AMMO_CAP[arg] - totalAmmo(a));
+      return { ok: true, give: { id: arg, rounds: add }, msg: W.thrown ? `${add} more ${W.ammoName}.` : `${add} ${W.ammoName ?? 'rounds'} for the ${W.name.toLowerCase()}.` };
     }
     case 'armour': pay(); p.armour = 100; return { ok: true, msg: 'Body armour on.' };
     case 'snack': case 'pie': case 'firstaid': {

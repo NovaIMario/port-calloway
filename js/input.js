@@ -2,7 +2,7 @@
 import { clamp } from './util.js';
 
 const PREVENT = new Set(['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab']);
-const SLOTS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'];
+const SLOTS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8'];
 
 export class Input {
   constructor(el) {
@@ -45,9 +45,11 @@ export class Input {
   down(...codes) { return codes.some((c) => this.keys.has(c)); }
   hit(...codes) { return codes.some((c) => this.hits.has(c)); }
 
-  // Collapse every device into one controls object. onFoot changes what a few pad buttons do.
-  read(sensitivity = 1, onFoot = true) {
+  // Collapse every device into one controls object. The mode ('foot', 'car', 'heli' or 'plane')
+  // changes what a few buttons do. lift is up and down for a helicopter and the nose for a plane.
+  read(sensitivity = 1, mode = 'foot') {
     const k = (...c) => (this.down(...c) ? 1 : 0);
+    const onFoot = mode === 'foot';
     const slot = SLOTS.findIndex((s) => this.hits.has(s)) + 1;
     const c = {
       moveX: k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft'),
@@ -56,6 +58,7 @@ export class Input {
       brake: k('KeyS', 'ArrowDown'),
       steer: k('KeyD', 'ArrowRight') - k('KeyA', 'ArrowLeft'),
       handbrake: this.down('Space'),
+      lift: k('Space') - k('ShiftLeft', 'ShiftRight'),
       sprint: this.down('ShiftLeft', 'ShiftRight'),
       jump: this.hit('Space'),
       enter: this.hit('KeyF', 'KeyE', 'Enter'),
@@ -77,12 +80,14 @@ export class Input {
       ui: { up: false, down: false, ok: false, back: false },
       device: 'keyboard',
     };
-    this.readPad(c, onFoot);
-    this.readTouch(c, onFoot);
+    this.readPad(c, mode);
+    this.readTouch(c, mode);
+    c.lift = clamp(c.lift, -1, 1);
     return c;
   }
 
-  readPad(c, onFoot) {
+  readPad(c, mode) {
+    const onFoot = mode === 'foot';
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const p = [...pads].find((x) => x && x.connected);
     if (!p) return;
@@ -109,7 +114,15 @@ export class Input {
     c.lookX += rx * 0.05;
     c.lookY += ry * 0.035;
     c.lookBack ||= pressed(10);
-    if (onFoot) {
+    if (mode === 'heli') {
+      // RT climbs, LT descends; the left stick flies it forward and back and turns it
+      c.lift += b(7) - b(6);
+      c.radio ||= edge(5);
+    } else if (mode === 'plane') {
+      // RT throttle, LT slows down; left stick: pull back to climb, left and right to bank
+      c.lift += ly;
+      c.radio ||= edge(5);
+    } else if (onFoot) {
       // LT aims, RT shoots, X reloads, RB and the d-pad change weapon
       const trigger = b(7) > 0.35;
       c.aim ||= b(6) > 0.35;
@@ -133,13 +146,23 @@ export class Input {
     this.prevPad = p.buttons.map((x) => x.pressed);
   }
 
-  readTouch(c, onFoot) {
-    const t = this.touch;
+  readTouch(c, mode) {
+    const t = this.touch, onFoot = mode === 'foot';
     if (!t.active && !t.buttons.size && !t.hits.size) return;
     c.device = 'touch';
     c.moveX = clamp(c.moveX + t.x, -1, 1);
     c.moveY = clamp(c.moveY + t.y, -1, 1);
     c.steer = clamp(c.steer + t.x, -1, 1);
+    // flying, the Brake and Horn buttons become Up and Down (relabelled on screen)
+    const up = t.buttons.has('brake') ? 1 : 0, dn = t.buttons.has('horn') ? 1 : 0;
+    if (mode === 'heli') { c.lift += up - dn; return this.touchCommon(c, t); }
+    if (mode === 'plane') {
+      // the stick banks and pitches; Up opens the throttle, Down closes it
+      c.lift += t.y;
+      c.throttle = Math.max(c.throttle, up);
+      c.brake = Math.max(c.brake, dn);
+      return this.touchCommon(c, t);
+    }
     if (t.y > 0.25) c.throttle = Math.max(c.throttle, Math.min(1, t.y * 1.4));
     if (t.y < -0.25) c.brake = Math.max(c.brake, Math.min(1, -t.y * 1.4));
     c.handbrake ||= t.buttons.has('brake');
@@ -154,6 +177,13 @@ export class Input {
     c.fireHit ||= t.hits.has('fire');
     if (!onFoot && t.buttons.has('fire')) c.aim = true; // shooting from a car aims where the camera looks
     c.nextWeapon ||= t.hits.has('gun');
+  }
+
+  touchCommon(c, t) {
+    c.enter ||= t.hits.has('enter');
+    c.radio ||= t.hits.has('radio');
+    c.map ||= t.hits.has('map');
+    c.pause ||= t.hits.has('pause');
   }
 
   endFrame() {

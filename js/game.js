@@ -4,7 +4,7 @@
 import { Traffic } from './traffic.js';
 import { Peds } from './peds.js';
 import { Police } from './police.js';
-import { Combat, WEAPONS, GUNS } from './combat.js';
+import { Combat, WEAPONS, GUNS, ARMS, blast } from './combat.js';
 import { shopItems, purchase } from './shops.js';
 import { MissionRunner, MISSIONS } from './missions.js';
 import { JobContext } from './jobs.js';
@@ -17,6 +17,21 @@ import { forwardOf, rightOf } from './util.js';
 
 const SAVE_KEY = 'port-calloway-save-1';
 const SHOP_REACH = 1.3; // how close to a shop door you walk to go in
+
+// What the controls are for the aircraft you just climbed into, on the device being used.
+function flightHelp(m, device) {
+  const k = (s) => `<kbd>${s}</kbd>`;
+  const heli = m.air === 'heli';
+  if (device === 'gamepad') return heli
+    ? `${m.name}: ${k('RT')} climb · ${k('LT')} descend · left stick flies and turns. ${k('Y')} jumps out.`
+    : `${m.name}: ${k('RT')} throttle · ${k('LT')} slow down · left stick: pull back to climb, sideways to bank. Lift off at about 80 km/h.`;
+  if (device === 'touch') return heli
+    ? `${m.name}: Up and Down climb and descend; the stick flies and turns.`
+    : `${m.name}: Up is the throttle, Down slows you; the stick climbs, dives and banks. Lift off at about 80 km/h.`;
+  return heli
+    ? `${m.name}: ${k('Space')} climb · ${k('Shift')} descend · ${k('W')}${k('S')} forward and back · ${k('A')}${k('D')} turn. ${k('F')} jumps out: high up, a parachute opens.`
+    : `${m.name}: ${k('W')} throttle · ${k('S')} slow down and brake · ${k('A')}${k('D')} bank · ${k('Space')} nose up · ${k('Shift')} nose down. Lift off at about 80 km/h.`;
+}
 
 export class Game {
   constructor({ world, hud, rig, gfx, props, meshes, input }) {
@@ -70,7 +85,7 @@ export class Game {
       for (const st of s.stunts || []) this.stunts.add(st);
       w.tod = s.tod ?? w.tod;
       // guns, armour, cars and clothes (saves from before they existed simply have none)
-      for (const id of GUNS) if (s.arms?.[id]) p.arms[id] = { mag: s.arms[id].mag | 0, ammo: s.arms[id].ammo | 0 };
+      for (const id of ARMS) if (s.arms?.[id]) p.arms[id] = { mag: s.arms[id].mag | 0, ammo: s.arms[id].ammo | 0 };
       p.weapon = WEAPONS[s.weapon] && (s.weapon === 'fist' || p.arms[s.weapon]) ? s.weapon : 'fist';
       p.armour = Math.max(0, Math.min(100, s.armour || 0));
       p.garage = (s.garage || []).filter((g) => MODELS[g.model]);
@@ -289,8 +304,19 @@ export class Game {
           this.peds.scare(e.x, e.z, 45);
           if (this.gunfireReport <= 0) { this.gunfireReport = 1.5; pol.report(e); }
           break;
+        case 'blast': // a rocket or a grenade (a car going up is handled by explode)
+          if (e.weapon !== 'car') {
+            this.effects.explosion(e.x, e.y, e.z);
+            this.audio.boom(this.near(e));
+            this.rig.shake = Math.max(this.rig.shake, 0.9 * this.near(e) + 0.1);
+            if (byMe(e.by)) pol.report(e);
+          }
+          this.peds.scare(e.x, e.z, 45);
+          break;
+        case 'throw': this.audio.punch(false); this.peds.scare(e.x, e.z, 12); break;
+        case 'plop': this.effects.splash(e.x, -2.2, e.z, 12); this.audio.splash(this.near(e) * 0.5); break;
         case 'punch':
-          this.audio.punch(e.hit);
+          this.audio.punch(e.hit, 1, e.weapon === 'bat');
           if (e.hit) { pol.report(e); this.peds.scare(e.x, e.z, 10); this.hud.hitMark('hit'); }
           break;
         case 'npcPunch': this.audio.punch(true, this.near(e.ped)); break;
@@ -311,7 +337,10 @@ export class Game {
           const k = e.k;
           if (k.kind === 'cash') { this.audio.cash(); if (k.amount >= 100) this.hud.notice(`Found $${k.amount.toLocaleString('en-GB')}.`, 2.5); break; }
           this.audio.pickup();
-          if (k.kind === 'weapon' || k.kind === 'ammo') this.hud.notice(`${WEAPONS[k.weapon].name}: +${k.amount ?? WEAPONS[k.weapon].start} rounds`, 2.5);
+          if (k.kind === 'weapon' || k.kind === 'ammo') {
+            const W = WEAPONS[k.weapon];
+            this.hud.notice(W.melee ? `Picked up a ${W.name.toLowerCase()}.` : `${W.name}: +${k.amount ?? W.start} ${W.ammoName ?? 'rounds'}`, 2.5);
+          }
           else this.hud.notice(k.kind === 'armour' ? 'Body armour on.' : 'Patched up.', 2);
           break;
         }
@@ -367,10 +396,20 @@ export class Game {
           if (e.v.model !== 'corso' || !e.v.owned) e.v.alarm = 3;
           this.audio.door();
           break;
-        case 'enter': case 'exit': this.audio.door(); break;
+        case 'enter':
+          this.audio.door();
+          if (e.v.m.air && mine(e.v)) this.hud.notice(flightHelp(e.v.m, this.device), 9);
+          break;
+        case 'exit': this.audio.door(); break;
+        case 'chute':
+          this.audio.whoosh(1);
+          this.hud.notice('Parachute open. Steer it with the movement keys.', 3);
+          break;
+        case 'chuteLand': this.audio.thud(0.5); break;
+        case 'swim': this.hud.notice('You came down in the water and swam ashore.', 3); break;
         case 'fire': this.audio.whoosh(this.near(e.v)); break;
         case 'explode': this.explode(e.v); break;
-        case 'sunk': if (mine(e.v) || e.v.everDriven) this.hud.notice('Splash. The car is at the bottom of the harbour now.', 3); break;
+        case 'sunk': if (mine(e.v) || e.v.everDriven) this.hud.notice(`Splash. The ${e.v.m.air === 'heli' ? 'helicopter' : e.v.m.air ? 'plane' : 'car'} is at the bottom of the harbour now.`, 3); break;
         case 'splash': this.effects.splash(e.v.x, -2, e.v.z); this.audio.splash(this.near(e.v)); if (mine(e.v)) this.stunt(e, true); break;
         case 'land':
           if (e.hard > 6) this.effects.dust(e.v.x, e.v.y, e.v.z, 6);
@@ -397,17 +436,9 @@ export class Game {
     this.effects.explosion(v.x, v.y, v.z);
     this.audio.boom(this.near(v));
     this.rig.shake = 0.8 * this.near(v) + 0.1;
-    for (const o of w.vehicles) {
-      const d = Math.hypot(o.x - v.x, o.z - v.z);
-      if (o === v || d > 9) continue;
-      o.health -= 55 * (1 - d / 9);
-      const k = (1 - d / 9) * 9 / (d || 1);
-      o.vx += (o.x - v.x) * k; o.vz += (o.z - v.z) * k; o.awake = true;
-    }
     if (p.vehicle === v) p.health = 0;
-    else if (!p.vehicle && Math.hypot(p.x - v.x, p.z - v.z) < 9) w.knockDown(p, (p.x - v.x) * 2, (p.z - v.z) * 2, 12);
-    for (const q of w.peds) if (Math.hypot(q.x - v.x, q.z - v.z) < 9 && !q.down) w.knockDown(q, (q.x - v.x) * 2, (q.z - v.z) * 2, 10);
-    this.peds.scare(v.x, v.z, 45);
+    // the same blast as a rocket's, a little weaker: cars nearby can go up too
+    blast(w, v.x, v.y + 0.8, v.z, 9, 75, null, 'car');
     if (v.model === 'interceptor') this.police.crime(120, v.x, v.z, { force: true });
     else if (v.everDriven || Math.hypot(p.x - v.x, p.z - v.z) < 40) this.police.crime(40, v.x, v.z, { callChance: 0.5 });
   }
@@ -445,9 +476,18 @@ export class Game {
     this.fxClock = (this.fxClock || 0) + dt;
     const tick = this.fxClock > 0.06;
     if (tick) this.fxClock = 0;
+    for (const k of w.projectiles) if (k.kind === 'rocket') fx.trail(k.x - k.dx * 0.7, k.y - k.dy * 0.7, k.z - k.dz * 0.7);
     for (const v of w.vehicles) {
       if (Math.abs(v.x - p.x) > 160 || Math.abs(v.z - p.z) > 160) continue;
       const f = forwardOf(v.h), rt = rightOf(v.h);
+      // rotor wash: dust thrown up off the ground under a low helicopter
+      if (v.m.air === 'heli' && tick && v.rotor > 0.5 && v.alt < 14 && !v.sinking && v.y - v.alt > -1) {
+        const gy = v.y - v.alt;
+        for (let k = 0; k < 2; k++) {
+          const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 4;
+          fx.dust(v.x + Math.cos(a) * r, gy, v.z + Math.sin(a) * r, 1);
+        }
+      }
       if (tick && (v.health < 45 || v.burning) && !v.sinking) {
         const hx = v.x + f.x * v.m.len * 0.35, hz = v.z + f.z * v.m.len * 0.35;
         fx.smoke(hx, v.y + v.m.hgt * 0.8, hz, v.burning || v.wrecked ? 0.95 : 1 - v.health / 60);
@@ -463,7 +503,7 @@ export class Game {
           }
           if (v.slip > 5 && tick) fx.dust(v.x - f.x * 1.5, v.y, v.z - f.z * 1.5, 1);
         }
-      } else if (tick && !v.airborne && v.speed > 12 && v.y > 0.1 && Math.random() < 0.3) {
+      } else if (tick && !v.airborne && !(v.m.air && !v.grounded) && v.speed > 12 && v.y > 0.1 && v.y < 0.5 && Math.random() < 0.3) {
         fx.dust(v.x - f.x * 2, v.y, v.z - f.z * 2, 1);
       }
       if (v.alarm > 0) v.alarm -= dt;
@@ -494,11 +534,23 @@ export class Game {
     }
     for (const v of this.world.vehicles) if (v.personal && !v.wrecked && v !== this.world.player.vehicle) out.push({ x: v.x, z: v.z, kind: 'friend' });
     for (const s of this.world.city.shops) out.push({ x: s.x, z: s.z, kind: s.kind, shop: true, label: full ? s.name : null });
+    for (const id of ['heliport', 'airstrip']) { const q = this.world.city.pois[id]; out.push({ x: q.x, z: q.z, kind: 'air', local: true, label: full ? q.name : null }); }
     if (full) {
       for (const rp of this.world.city.ramps) if (!this.stunts.has(rp.name)) out.push({ x: rp.x, z: rp.z, kind: 'stunt', label: rp.name });
       for (const id of ['garage', 'hospital', 'police']) { const q = this.world.city.pois[id]; out.push({ x: q.x, z: q.z, kind: 'poi', label: q.name }); }
     }
     return out;
+  }
+
+  // After dark the player's vehicle throws a beam down the road ahead.
+  headlights(env) {
+    const v = this.world.player.vehicle, hl = this.gfx.head;
+    if (!hl) return;
+    if (!v || v.wrecked || v.sinking || env.night < 0.15) { hl.intensity = 0; return; }
+    const f = forwardOf(v.h), nose = v.m.len / 2;
+    hl.position.set(v.x + f.x * nose, v.y + 0.85, v.z + f.z * nose);
+    hl.target.position.set(v.x + f.x * (nose + 26), v.y - 0.6, v.z + f.z * (nose + 26));
+    hl.intensity = env.night * 140;
   }
 
   // The person a hip-fired (or gamepad-aimed) shot would go to, as a point on screen.
@@ -528,9 +580,10 @@ export class Game {
       this.rig.update(dt, p, c);
     }
     const env = this.gfx.setTime(w.tod, p);
-    for (const m of this.meshes.night) m.emissiveIntensity = env.night * env.night * 0.9;
+    for (const m of this.meshes.night) m.emissiveIntensity = env.night * env.night * 1.0;
     for (const m of this.props.lampMats) m.emissiveIntensity = env.night * 2;
-    this.props.pools.opacity = env.night * 0.55;
+    this.props.pools.opacity = env.night * 0.7;
+    this.headlights(env);
     this.props.updateSignals(w.time);
     this.meshes.water.material.map.offset.set(w.time * 0.004, w.time * 0.0025);
     this.effects.update(dt);
@@ -541,6 +594,7 @@ export class Game {
     this.markers.setBeacons(beacons, w.time, ground);
     this.markers.setShops(w.city.shops, w.time, ground, p, (s) => this.shopClosed(s));
     this.pickupView?.update(w.pickups, w.time, p);
+    this.projectileView?.update(w.projectiles, w.time);
     this.audio.update(dt, w, this.police, env);
     if (c) {
       const W = WEAPONS[p.weapon], a = p.arms[p.weapon];
@@ -548,8 +602,9 @@ export class Game {
       this.hud.update(dt, w, {
         prompt: this.prompt(), heat: this.police.level, heatSeen: this.police.seen, blips: this.blips(), yaw: this.rig.yaw,
         timer: this.timer, radio: this.audio.stationName(), radioShow: this.audio.showName > 0 && !!p.vehicle,
-        weapon: showWeapon ? { id: W.id, name: W.name, melee: !!W.melee, mag: a?.mag ?? 0, ammo: a?.ammo ?? 0, reloading: p.reloadT > 0 } : null,
-        crosshair: p.health > 0 && (p.aiming || p.driveAim) ? 'aim' : null,
+        weapon: showWeapon ? { id: W.id, name: W.name, melee: !!W.melee, thrown: !!W.thrown, mag: a?.mag ?? 0, ammo: a?.ammo ?? 0, reloading: p.reloadT > 0 } : null,
+        crosshair: p.health > 0 && !p.scoped && (p.aiming || p.driveAim) ? 'aim' : null,
+        scope: p.health > 0 && p.scoped,
         target: this.targetMark(),
       });
     }

@@ -54,6 +54,11 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1118; col
 #crosshair[data-mark="kill"] i:nth-child(3), #crosshair[data-mark="kill"] i:nth-child(4) { transform: rotate(45deg); }
 #target { position: absolute; left: -7px; top: -10px; width: 0; height: 0; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 10px solid #ffd27a; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.8)); }
 #target.cop { border-top-color: var(--police); }
+/* sniper scope: a round view with thin cross hairs, black all round */
+#scope { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at center, transparent 0, transparent min(36vh, 36vw), rgba(0,0,0,0.92) calc(min(36vh, 36vw) + 2px)); }
+#scope i { position: absolute; left: 50%; top: 50%; background: rgba(0,0,0,0.85); }
+#scope i:nth-child(1) { width: min(72vh, 72vw); height: 1px; transform: translate(-50%, -50%); }
+#scope i:nth-child(2) { width: 1px; height: min(72vh, 72vw); transform: translate(-50%, -50%); }
 #hurt { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 55%, rgba(190, 20, 20, 0.55) 100%); }
 
 .tr { position: absolute; top: 16px; right: 18px; display: grid; gap: 6px; justify-items: end; }
@@ -74,7 +79,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #0d1118; col
 #radio.show { opacity: 1; }
 
 #prompt { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--panel); padding: 8px 14px; border-radius: 8px; font-size: 15px; }
-#prompt kbd, .controls kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 5px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.25); font: 600 13px var(--font); text-align: center; }
+#prompt kbd, .controls kbd, #notice kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 5px; background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.25); font: 600 13px var(--font); text-align: center; }
 #notice { position: absolute; left: 18px; top: 112px; max-width: 320px; background: var(--panel); padding: 10px 14px; border-radius: 10px; font-size: 15px; line-height: 1.4; }
 #subtitle { position: absolute; left: 50%; bottom: 56px; transform: translateX(-50%); width: min(760px, 86vw); text-align: center; font-size: 19px; line-height: 1.4; }
 #subtitle b { color: var(--accent-2); margin-right: 8px; }

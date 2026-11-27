@@ -18,6 +18,8 @@ const GUNS = {
   smg: [0.09, 0.4, 'bandpass', 2300, 220, 0.06],
   shotgun: [0.42, 0.85, 'lowpass', 1500, 140, 0.3],
   rifle: [0.18, 0.62, 'highpass', 900, 170, 0.14],
+  sniper: [0.45, 0.95, 'highpass', 650, 130, 0.35],
+  launcher: [0.7, 0.55, 'lowpass', 700, 90, 0.45],
 };
 
 export class GameAudio {
@@ -54,6 +56,15 @@ export class GameAudio {
     this.eng.a.connect(this.eng.f); this.eng.b.connect(this.eng.f); this.eng.f.connect(this.eng.g); this.eng.g.connect(this.sfx);
     this.eng.a.start(); this.eng.b.start();
     this.screech = this.loopNoise('bandpass', 1900, 6);
+    // helicopter: low noise pulsed at the blade-pass rate, and a turbine whine
+    this.chop = this.loopNoise('lowpass', 380, 0.8);
+    this.chopLfo = ctx.createOscillator(); this.chopLfo.type = 'square'; this.chopLfo.frequency.value = 16;
+    this.chopDepth = ctx.createGain(); this.chopDepth.gain.value = 0;
+    this.chopLfo.connect(this.chopDepth); this.chopDepth.connect(this.chop.g.gain);
+    this.chopLfo.start();
+    this.whine = { o: ctx.createOscillator(), g: ctx.createGain() };
+    this.whine.o.type = 'sine'; this.whine.o.frequency.value = 900; this.whine.g.gain.value = 0;
+    this.whine.o.connect(this.whine.g); this.whine.g.connect(this.sfx); this.whine.o.start();
     this.wind = this.loopNoise('lowpass', 500, 0.7);
     this.horn = { a: ctx.createOscillator(), b: ctx.createOscillator(), g: ctx.createGain(), f: ctx.createBiquadFilter() };
     this.horn.a.type = this.horn.b.type = 'square';
@@ -95,7 +106,22 @@ export class GameAudio {
     if (this.showName > 0) this.showName -= dt;
     if (!this.ctx || this.ctx.state !== 'running') return;
     const p = world.player, v = p.vehicle;
-    if (v && !v.wrecked) {
+    if (v && !v.wrecked && v.m.air === 'plane') {
+      // a propeller drone that rises with the throttle
+      const r = v.rotor, f = 30 + r * 72;
+      this.set(this.eng.a.frequency, f);
+      this.set(this.eng.b.frequency, f * 0.5);
+      this.set(this.eng.f.frequency, 300 + r * 1100);
+      this.set(this.eng.g.gain, (0.04 + r * 0.1) * (v.health > 0 ? 1 : 0.3));
+      this.set(this.screech.g.gain, 0);
+      this.set(this.wind.g.gain, clamp(v.speed / 70, 0, 0.3));
+      this.set(this.horn.g.gain, 0, 0.01);
+    } else if (v && !v.wrecked && v.m.air) {
+      this.set(this.eng.g.gain, 0, 0.1);
+      this.set(this.screech.g.gain, 0);
+      this.set(this.wind.g.gain, clamp(v.speed / 60, 0, 0.25));
+      this.set(this.horn.g.gain, 0, 0.01);
+    } else if (v && !v.wrecked) {
       const vl = Math.abs(v.vx * Math.sin(v.h) + v.vz * Math.cos(v.h));
       let g = 1;
       while (g < GEARS.length - 1 && vl > GEARS[g]) g++;
@@ -116,6 +142,19 @@ export class GameAudio {
       this.set(this.wind.g.gain, 0);
       this.set(this.horn.g.gain, 0, 0.01);
     }
+    // rotor chop: your own helicopter, or the nearest one with its rotor turning
+    let heli = null, hk = 0;
+    if (v?.m.air === 'heli' && !v.wrecked) { heli = v; hk = 1; }
+    else for (const o of world.vehicles) {
+      if (o.m.air !== 'heli' || !(o.rotor > 0.05)) continue;
+      const k = 1 - Math.hypot(o.x - p.x, o.z - p.z) / 150;
+      if (k > hk) { hk = k; heli = o; }
+    }
+    const r = heli ? heli.rotor * hk : 0;
+    this.set(this.chop.g.gain, r * 0.15);
+    this.set(this.chopDepth.gain, r * 0.14);
+    this.set(this.whine.g.gain, r * 0.012);
+    if (heli) { this.set(this.chopLfo.frequency, 4 + heli.rotor * 14); this.set(this.whine.o.frequency, 300 + heli.rotor * 700); }
     // the nearest police siren
     let near = 0;
     if (police.level > 0) for (const u of police.units()) if (u.siren) near = Math.max(near, 1 - Math.hypot(u.x - p.x, u.z - p.z) / 160);
@@ -288,10 +327,17 @@ export class GameAudio {
     this.noiseHit(t + 0.05, 0.03, 0.22, 'bandpass', 2400, this.sfx);
     this.noiseHit(t + seconds * 0.85, 0.05, 0.3, 'bandpass', 1500, this.sfx);
   }
-  punch(hit = true, near = 1) {
+  punch(hit = true, near = 1, bat = false) {
     if (!this.ok() || near <= 0) return;
-    if (hit) { this.sweep(210, 55, 0.09, 0.45 * near); this.noiseHit(this.ctx.currentTime, 0.05, 0.25 * near, 'lowpass', 900, this.sfx); }
-    else this.noiseHit(this.ctx.currentTime, 0.12, 0.08 * near, 'bandpass', 700, this.sfx);
+    const t = this.ctx.currentTime;
+    if (bat) {
+      // a whoosh, and a hollow wooden crack when it connects
+      this.noiseHit(t, 0.16, 0.12 * near, 'bandpass', 500, this.sfx);
+      if (hit) { this.sweep(320, 70, 0.12, 0.5 * near, 'triangle'); this.noiseHit(t, 0.06, 0.35 * near, 'bandpass', 1400, this.sfx); }
+      return;
+    }
+    if (hit) { this.sweep(210, 55, 0.09, 0.45 * near); this.noiseHit(t, 0.05, 0.25 * near, 'lowpass', 900, this.sfx); }
+    else this.noiseHit(t, 0.12, 0.08 * near, 'bandpass', 700, this.sfx);
   }
   pickup() { this.sweep(660, 990, 0.08, 0.1); setTimeout(() => this.sweep(990, 1320, 0.1, 0.08), 70); }
 }

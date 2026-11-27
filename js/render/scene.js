@@ -4,8 +4,9 @@ import { clamp, lerp } from '../util.js';
 
 // Keyframes by sun elevation (sine of the angle above the horizon).
 const KEYS = [
-  { e: -0.35, top: 0x060a1a, hor: 0x121a30, light: 0x7d8fc8, li: 0.35, hemi: 0x2c3a6a, gnd: 0x0d1018, hi: 0.5, fog: 0x0f1628, night: 1 },
-  { e: -0.08, top: 0x18214a, hor: 0x6b4560, light: 0x8a8fc0, li: 0.3, hemi: 0x3b4270, gnd: 0x1a1a22, hi: 0.6, fog: 0x3a3048, night: 0.95 },
+  // night is moonlit blue rather than black: enough sky light to read streets, cars and people
+  { e: -0.35, top: 0x0c1636, hor: 0x22305a, light: 0xa8b8f0, li: 0.9, hemi: 0x7088c8, gnd: 0x30343f, hi: 1.05, fog: 0x1d2848, night: 1 },
+  { e: -0.08, top: 0x1d2a58, hor: 0x7a5670, light: 0xa0a8d8, li: 0.7, hemi: 0x6a74b0, gnd: 0x34323c, hi: 1.0, fog: 0x463c5c, night: 0.95 },
   { e: 0.03, top: 0x34508a, hor: 0xf09060, light: 0xff9a5c, li: 1.0, hemi: 0x8a90b8, gnd: 0x3a3030, hi: 0.8, fog: 0xc98a72, night: 0.55 },
   { e: 0.16, top: 0x4a84c6, hor: 0xffd3a4, light: 0xffd2a2, li: 2.2, hemi: 0xb8cce8, gnd: 0x5a5448, hi: 1.0, fog: 0xe8cfb0, night: 0 },
   { e: 0.5, top: 0x3a7bd2, hor: 0xcfe5f5, light: 0xfff8ee, li: 2.8, hemi: 0xc8dcf2, gnd: 0x5e5a50, hi: 1.1, fog: 0xc9dcea, night: 0 },
@@ -45,6 +46,10 @@ export function createScene(canvas) {
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.6;
   scene.add(sun, sun.target);
+  // the player's headlights (or an aircraft's landing light) after dark
+  const head = new THREE.SpotLight(0xfff0d8, 0, 95, 0.6, 0.55, 1.1);
+  head.castShadow = false;
+  scene.add(head, head.target);
 
   const sky = new THREE.Mesh(new THREE.SphereGeometry(3200, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
@@ -93,6 +98,7 @@ export function createScene(canvas) {
     scene.fog.color.copy(mix('fog', e, tmpC));
     env.fogColor.copy(scene.fog.color);
     env.night = mix('night', e);
+    renderer.toneMappingExposure = 1.15 + 0.3 * env.night;
     starMat.opacity = clamp((env.night - 0.5) * 2, 0, 1);
     // When the sun is down, light comes from the moon on the other side of the sky.
     const lightDir = e > -0.02 ? dir : new THREE.Vector3(-dir.x, Math.max(0.35, -dir.y), -dir.z).normalize();
@@ -113,5 +119,5 @@ export function createScene(canvas) {
   }
   window.addEventListener('resize', resize);
   resize();
-  return { renderer, scene, camera, sun, hemi, setTime, resize, env };
+  return { renderer, scene, camera, sun, hemi, head, setTime, resize, env };
 }

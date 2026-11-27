@@ -3,7 +3,8 @@
 import { buildStaticGrid, createVehicle, stepVehicle, collideVehicles, circleContact, GRAVITY } from './physics.js';
 import { heightAt } from './citygen.js';
 import { clamp, wrapAngle, forwardOf, rightOf, hash2, dist2 } from './util.js';
-import { areaName } from './city.js';
+import { areaName, WATER_Y } from './city.js';
+import { stepAircraft, floorAt } from './aircraft.js';
 
 export const CIVILIAN_MODELS = ['corso', 'corso', 'meridian', 'meridian', 'meridian', 'ranger', 'tasker', 'haulmark', 'cab', 'vireo'];
 export const SUPERCARS = ['halcyon', 'halcyon', 'vantor']; // now and then one turns up in traffic or a car park
@@ -79,6 +80,9 @@ export class World {
   }
 
   drive(v, c) {
+    const air = v.m.air;
+    if (air === 'heli') { v.input.fwd = c.moveY; v.input.yaw = c.steer; v.input.lift = c.lift || 0; return; }
+    if (air === 'plane') { v.input.throttle = c.throttle; v.input.brake = c.brake; v.input.bank = c.steer; v.input.pitch = c.lift || 0; return; }
     v.input.throttle = c.throttle;
     v.input.brake = c.brake;
     v.input.steer = c.steer;
@@ -88,6 +92,7 @@ export class World {
 
   walk(dt, c, camYaw) {
     const p = this.player, city = this.city;
+    if (p.chute) return this.glide(dt, c, camYaw);
     if (p.down > 0) {
       p.downTime -= dt;
       if (p.downTime <= 0) p.down = Math.max(0, p.down - dt * 2.5);
@@ -114,13 +119,20 @@ export class World {
       if (g === null || g > p.y + 0.6) { if (axis === 'x') p.vx = 0; else p.vz = 0; continue; }
       p.x = nx; p.z = nz;
     }
-    const g = heightAt(city, p.x, p.z) ?? p.y;
+    // the ground, or a roof (you can be put down on one by helicopter)
+    const g = floorAt(city, this.grid, p.x, p.z, p.y) ?? p.y;
     p.vy -= GRAVITY * dt;
     p.y += p.vy * dt;
-    if (p.y <= g) { p.y = g; p.vy = 0; p.grounded = true; } else if (p.y > g + 0.05) p.grounded = false;
+    if (p.y <= g) {
+      // a long drop hurts
+      if (p.vy < -12 && p.down === 0) this.knockDown(p, p.vx, p.vz, (-p.vy - 12) * 2.2);
+      p.y = g; p.vy = 0; p.grounded = true;
+    } else if (p.y > g + 0.05) p.grounded = false;
+    // falling a long way: the parachute opens by itself
+    if (!p.grounded && p.vy < -11 && p.y - g > 8 && p.health > 0) this.openChute();
     const near = this.grid.query(p.x - 1, p.z - 1, p.x + 1, p.z + 1);
     for (const col of near) {
-      if (col.broken || p.y > col.h) continue;
+      if (col.broken || p.y > col.h - 0.1) continue;
       const hit = circleContact(p.x, p.z, 0.35, col);
       if (hit) { p.x += hit.nx * hit.depth; p.z += hit.nz * hit.depth; }
     }
@@ -141,6 +153,47 @@ export class World {
     p.speed = Math.hypot(p.vx, p.vz);
     p.phase += p.speed * dt * 2.3;
     p.swing = Math.sin(p.phase) * Math.min(1, p.speed / 3) * 0.75;
+  }
+
+  openChute() {
+    const p = this.player;
+    Object.assign(p, { chute: 0.01, down: 0, aiming: false });
+    this.emit({ type: 'chute', x: p.x, y: p.y, z: p.z });
+  }
+
+  // Under the parachute: drift down slowly, steering with the movement keys.
+  glide(dt, c, camYaw) {
+    const p = this.player, city = this.city;
+    const f = forwardOf(camYaw), r = rightOf(camYaw);
+    let mx = f.x * c.moveY + r.x * c.moveX, mz = f.z * c.moveY + r.z * c.moveX;
+    const len = Math.hypot(mx, mz);
+    if (len > 1) { mx /= len; mz /= len; }
+    const k = 1 - Math.exp(-1.2 * dt);
+    p.vx += (mx * 6.5 - p.vx) * k;
+    p.vz += (mz * 6.5 - p.vz) * k;
+    p.vy += (-4.5 - p.vy) * (1 - Math.exp(-2.5 * dt));
+    p.chute = Math.min(1, p.chute + dt * 1.8);
+    if (len > 0.1) p.h = lerpAngle(p.h, Math.atan2(mx, mz), 1 - Math.exp(-3 * dt));
+    p.x += p.vx * dt; p.z += p.vz * dt; p.y += p.vy * dt;
+    for (const col of this.grid.query(p.x - 1, p.z - 1, p.x + 1, p.z + 1)) {
+      if (col.broken || p.y > col.h - 0.1) continue;
+      const hit = circleContact(p.x, p.z, 0.35, col);
+      if (hit) { p.x += hit.nx * hit.depth; p.z += hit.nz * hit.depth; }
+    }
+    const g = floorAt(city, this.grid, p.x, p.z, p.y);
+    if (g === null && p.y < WATER_Y + 0.6) {
+      // came down in the harbour: swim for it
+      p.chute = 0;
+      const land = this.nearestLand(p.x, p.z);
+      if (land) { p.x = land.x; p.z = land.z; p.y = land.g; }
+      p.vx = p.vz = p.vy = 0;
+      this.emit({ type: 'swim' });
+    } else if (g !== null && p.y <= g) {
+      p.y = g; p.vy = 0; p.grounded = true; p.chute = 0;
+      this.emit({ type: 'chuteLand', x: p.x, z: p.z });
+    }
+    p.speed = Math.hypot(p.vx, p.vz);
+    p.swing = 0;
   }
 
   knockDown(who, vx, vz, impact, by = null) {
@@ -197,7 +250,7 @@ export class World {
       const d = v.driver;
       v.driver = null;
       this.emit({ type: 'jack', v, driver: d });
-    } else if (v.parked && !v.owned) this.emit({ type: 'steal', v });
+    } else if (v.parked && !v.owned && !v.m.air) this.emit({ type: 'steal', v });
     v.driver = 'player';
     v.parked = false;
     v.ai = null;
@@ -209,22 +262,31 @@ export class World {
 
   exitVehicle() {
     const p = this.player, v = p.vehicle;
-    const rt = rightOf(v.h);
-    const off = v.m.wid / 2 + 0.7;
+    const rt = rightOf(v.h), fw = forwardOf(v.h);
+    const off = v.m.wid / 2 + 0.7, ends = v.m.len / 2 + 0.8;
+    const bail = v.m.air && !v.grounded && !v.sinking; // jumping out in flight
     let placed = false;
-    for (const side of [-1, 1]) {
-      const x = v.x + rt.x * off * side, z = v.z + rt.z * off * side;
-      const g = heightAt(this.city, x, z);
-      if (g === null) continue;
+    // out of a door if there is room, else round the back or the front
+    const spots = [[-rt.x * off, -rt.z * off], [rt.x * off, rt.z * off], [-fw.x * ends, -fw.z * ends], [fw.x * ends, fw.z * ends]];
+    for (const [ox, oz] of bail ? [] : spots) {
+      const x = v.x + ox, z = v.z + oz;
+      const g = floorAt(this.city, this.grid, x, z, v.y);
+      // not into the water, and (from an aircraft on a roof) not over the edge
+      if (g === null || (v.m.air && g < v.y - 1.5)) continue;
       const blocked = this.grid.query(x - 0.5, z - 0.5, x + 0.5, z + 0.5).some((c) => !c.broken && c.h > g + 0.5 && circleContact(x, z, 0.35, c));
       if (blocked) continue;
       p.x = x; p.z = z; p.y = g; placed = true;
       break;
     }
-    if (!placed) { p.x = v.x; p.z = v.z; p.y = v.y + v.m.hgt; }
+    if (bail) { p.x = v.x - rt.x * off; p.z = v.z - rt.z * off; p.y = v.y + 0.3; }
+    else if (!placed) { p.x = v.x; p.z = v.z; p.y = v.y + v.m.hgt; }
     p.h = v.h;
-    p.vx = v.vx * 0.6; p.vz = v.vz * 0.6; p.vy = 0;
-    if (v.speed > 8) this.knockDown(p, v.vx * 0.6, v.vz * 0.6, Math.min(v.speed * 0.5, 9));
+    p.vx = v.vx * 0.6; p.vz = v.vz * 0.6; p.vy = bail ? Math.min(0, v.vy) : 0;
+    p.grounded = !bail;
+    if (bail) {
+      const g = floorAt(this.city, this.grid, p.x, p.z, p.y);
+      if (p.y - (g ?? WATER_Y) > 10) this.openChute();
+    } else if (v.speed > 8) this.knockDown(p, v.vx * 0.6, v.vz * 0.6, Math.min(v.speed * 0.5, 9));
     v.driver = null;
     v.input.throttle = v.input.brake = v.input.steer = 0;
     v.input.handbrake = false;
@@ -238,26 +300,31 @@ export class World {
     const p = this.player;
     this.exitVehicle();
     // swim to the nearest bit of land
-    let best = null;
-    for (let rr = 4; rr < 120 && !best; rr += 4) {
-      for (let a = 0; a < 16; a++) {
-        const x = v.x + Math.sin(a / 16 * Math.PI * 2) * rr, z = v.z + Math.cos(a / 16 * Math.PI * 2) * rr;
-        const g = heightAt(this.city, x, z);
-        if (g !== null) { best = { x, z, g }; break; }
-      }
-    }
-    if (best) { p.x = best.x; p.z = best.z; p.y = best.g; p.down = 0; }
+    const best = this.nearestLand(v.x, v.z);
+    if (best) { p.x = best.x; p.z = best.z; p.y = best.g; p.down = 0; p.chute = 0; p.vx = p.vz = p.vy = 0; }
     v.wrecked = true;
     this.emit({ type: 'sunk', v });
+  }
+
+  nearestLand(x0, z0) {
+    for (let rr = 4; rr < 160; rr += 4) {
+      for (let a = 0; a < 16; a++) {
+        const x = x0 + Math.sin(a / 16 * Math.PI * 2) * rr, z = z0 + Math.cos(a / 16 * Math.PI * 2) * rr;
+        const g = heightAt(this.city, x, z);
+        if (g !== null) return { x, z, g };
+      }
+    }
+    return null;
   }
 
   stepVehicles(dt) {
     const vs = this.vehicles;
     for (const v of vs) {
-      if (!v.driver && !v.ai && v.speed < 0.02 && !v.airborne && !v.sinking && !v.awake) continue;
+      if (!v.driver && !v.ai && v.speed < 0.02 && !v.airborne && !v.sinking && !v.awake && !v.burning && !(v.m.air && (v.rotor > 0 || !v.grounded))) continue;
       v.awake = false;
       if (!v.driver && !v.ai) { v.input.throttle = 0; v.input.brake = v.speed > 0.5 ? 0.15 : 0; v.input.steer = 0; v.input.handbrake = false; }
-      stepVehicle(v, dt, this.city, this.grid, this.events);
+      if (v.m.air) stepAircraft(v, dt, this.city, this.grid, this.events);
+      else stepVehicle(v, dt, this.city, this.grid, this.events);
       if (v.health <= 0 && !v.wrecked && !v.burning) { v.burning = 4.5; this.emit({ type: 'fire', v }); }
       if (v.burning) {
         v.burning -= dt;
@@ -290,7 +357,7 @@ export class World {
     this.city.parking.forEach((s, i) => {
       if (Math.abs(s.x - p.x) > R || Math.abs(s.z - p.z) > R) return;
       const k = hash2(Math.round(s.x), Math.round(s.z), 3);
-      if (!s.police && !s.wreck && !s.display && k > 0.33) return;
+      if (!s.police && !s.wreck && !s.display && !s.aircraft && k > 0.33) return;
       wanted.push([Math.hypot(s.x - p.x, s.z - p.z), i, k]);
     });
     wanted.sort((a, b) => a[0] - b[0]);
@@ -302,9 +369,9 @@ export class World {
       const s = this.city.parking[i];
       if (this.spawnedSpots.has(i)) return;
       const rare = !s.wreck && hash2(i, 13) < 0.03;
-      const model = s.display || (s.police ? 'interceptor' : rare ? SUPERCARS[Math.floor(hash2(i, 17) * SUPERCARS.length)] : CIVILIAN_MODELS[Math.floor(hash2(i, 7) * CIVILIAN_MODELS.length)]);
+      const model = s.aircraft || s.display || (s.police ? 'interceptor' : rare ? SUPERCARS[Math.floor(hash2(i, 17) * SUPERCARS.length)] : CIVILIAN_MODELS[Math.floor(hash2(i, 7) * CIVILIAN_MODELS.length)]);
       const color = s.color ?? (s.wreck ? 0x6b5a4a : paintFor(model, hash2(i, 11)));
-      const v = this.addVehicle(model, s.x, s.z, s.display ? s.h : s.h + (k - 0.25) * 0.1, { color, parked: true, spot: i });
+      const v = this.addVehicle(model, s.x, s.z, s.display || s.aircraft ? s.h : s.h + (k - 0.25) * 0.1, { color, parked: true, spot: i });
       if (s.wreck) { v.health = 25; v.locked = true; }
       if (s.police || s.display) v.locked = true;
       this.spawnedSpots.set(i, v);

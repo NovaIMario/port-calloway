@@ -42,7 +42,23 @@ export class CameraRig {
     const hasLook = Math.abs(c.lookX) + Math.abs(c.lookY) > 0.0005;
     if (hasLook) this.idle = 0; else this.idle += dt;
     let clipFrom = look, rate = v ? 12 : 14, lookRate = 18;
-    if (v) {
+    if (v && v.m.air) {
+      // flying: further back and higher up; a plane's camera also tips with its climb or dive
+      const plane = v.m.air === 'plane';
+      if (hasLook) { this.manual = wrapAngle(this.manual - c.lookX); this.pitch = clamp(this.pitch + c.lookY, -0.35, 1.2); }
+      if (this.idle > 1.5) { this.manual *= Math.exp(-2 * dt); this.pitch += (0.22 - this.pitch) * (1 - Math.exp(-1.5 * dt)); }
+      const target = v.h + this.manual + (c.lookBack ? Math.PI : 0);
+      this.yaw = c.lookBack || this.snapNext ? target : lerpAngle(this.yaw, target, 1 - Math.exp(-(plane ? 4 : 3) * dt));
+      const dist = (plane ? 15 : 14) * [1, 1.45, 0.72][this.mode] + Math.min(v.speed, 80) * 0.05;
+      const ph = this.pitch - (plane && !v.grounded ? v.pitch * 0.6 : 0);
+      const f = forwardOf(this.yaw);
+      desired.set(v.x - f.x * dist * Math.cos(ph), v.y + 2.6 + dist * Math.sin(ph), v.z - f.z * dist * Math.cos(ph));
+      look.set(v.x + f.x * 4, v.y + 2.2 + (plane && !v.grounded ? Math.sin(v.pitch) * 6 : 0), v.z + f.z * 4);
+      desired.y = Math.max(desired.y, v.y - (v.alt ?? 0) + 1.2);
+      rate = 10; lookRate = 14;
+      const fov = 64 + Math.min(12, v.speed * 0.16);
+      if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 3); this.camera.updateProjectionMatrix(); }
+    } else if (v) {
       const M = MODES[this.mode];
       if (hasLook) { this.manual = wrapAngle(this.manual - c.lookX); this.pitch = clamp(this.pitch + c.lookY, -0.1, 0.9); }
       // shooting out of the window: the camera stays where you point it
@@ -60,10 +76,22 @@ export class CameraRig {
       const fov = 64 + Math.min(14, v.speed * 0.28);
       if (Math.abs(this.camera.fov - fov) > 0.05) { this.camera.fov += (fov - this.camera.fov) * Math.min(1, dt * 3); this.camera.updateProjectionMatrix(); }
     } else {
-      if (hasLook) { this.yaw = wrapAngle(this.yaw - c.lookX); this.pitch = clamp(this.pitch + c.lookY, -0.5, 1.2); }
+      // through a scope the view is zoomed, so the mouse turns it more slowly
+      const sens = player.scoped ? 0.22 : 1;
+      if (hasLook) { this.yaw = wrapAngle(this.yaw - c.lookX * sens); this.pitch = clamp(this.pitch + c.lookY * sens, -0.5, 1.2); }
       const moving = Math.abs(c.moveX) + Math.abs(c.moveY) > 0 && player.speed > 1;
       let fov = 62;
-      if (player.aiming) {
+      if (player.scoped) {
+        // looking down the sniper's scope, from the player's eyes
+        const ap = (this.aimPitch = clamp(this.pitch - 0.3, -0.75, 0.85));
+        const f = forwardOf(this.yaw);
+        const dir = this.dir.set(f.x * Math.cos(ap), -Math.sin(ap), f.z * Math.cos(ap));
+        const eye = new THREE.Vector3(player.x + f.x * 0.15, player.y + 1.66, player.z + f.z * 0.15);
+        desired.copy(eye);
+        look.copy(eye).addScaledVector(dir, 30);
+        clipFrom = eye;
+        rate = 60; lookRate = 60; fov = 14;
+      } else if (player.aiming) {
         // over the right shoulder, looking where the gun points
         const ap = (this.aimPitch = clamp(this.pitch - 0.3, -0.75, 0.85));
         const f = forwardOf(this.yaw), rt = rightOf(this.yaw);

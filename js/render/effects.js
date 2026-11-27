@@ -87,6 +87,14 @@ export class Effects {
     });
   }
 
+  // the thin grey line a rocket leaves behind it
+  trail(x, y, z) {
+    this.emit(x + (Math.random() - 0.5) * 0.15, y, z + (Math.random() - 0.5) * 0.15, {
+      vx: (Math.random() - 0.5) * 0.3, vy: 0.3, vz: (Math.random() - 0.5) * 0.3,
+      life: 1.1 + Math.random() * 0.4, size: 0.45, grow: 1.3, r: 0.8, g: 0.79, b: 0.76, a: 0.5, drag: 1.5,
+    });
+  }
+
   smoke(x, y, z, dark = 0.5, n = 1) {
     for (let i = 0; i < n; i++) {
       const c = 0.75 - dark * 0.6;

@@ -19,7 +19,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Simulation tests (city, physics, traffic, police, combat, shops, missions)
+      - name: Simulation tests (city, physics, traffic, police, combat, aircraft, shops, missions)
         run: node --test
       - name: Build the site
         run: mkdir _site && cp -r index.html style.css js _site/

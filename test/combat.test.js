@@ -97,13 +97,13 @@ test('a click while the gun is not quite ready still fires', () => {
   assert.equal(p.arms.pistol.mag, 11, 'fired twice for one click');
 });
 
-test('an empty magazine reloads from the reserve, which takes time', () => {
+test('an empty magazine reloads from the reserve by itself, which takes time', () => {
   const { world, combat, p } = setup();
   combat.give('pistol');
   combat.select('pistol');
   for (let k = 0; k < 12; k++) shoot(world, combat);
   assert.equal(p.arms.pistol.mag, 0);
-  shoot(world, combat); // click: starts the reload
+  run(combat, WEAPONS.pistol.rate + 0.05); // the last shot goes, then the reload starts
   assert.ok(p.reloadT > 1);
   assert.equal(p.arms.pistol.mag, 0);
   run(combat, WEAPONS.pistol.reload + 0.1);
@@ -195,4 +195,94 @@ test('pickups: cash, guns and armour; spots come back later', () => {
   hurtPlayer(world, 90);
   assert.equal(p.armour, 0);
   assert.equal(p.health, 80);
+});
+
+test('the bat shares slot 1 with your fists and hits much harder', () => {
+  const { world, combat, p } = setup();
+  combat.give('bat');
+  combat.give('pistol');
+  combat.select('pistol');
+  combat.pickSlot(1);
+  assert.equal(p.weapon, 'fist'); // from another slot: the first thing in slot 1
+  combat.pickSlot(1);
+  assert.equal(p.weapon, 'bat'); // pressed again: along the slot
+  const q = person(world, 3, 51.5);
+  shoot(world, combat);
+  assert.equal(q.health, 100 - WEAPONS.bat.dmg);
+  assert.ok(world.events.some((e) => e.type === 'punch' && e.hit && e.weapon === 'bat'));
+  combat.pickSlot(1);
+  assert.equal(p.weapon, 'fist');
+});
+
+test('a rocket flies to the car it was fired at and the blast wrecks it', () => {
+  const { world, combat, p } = setup();
+  const car = world.addVehicle('meridian', 3, 80, 0);
+  const by = person(world, 5.5, 80);
+  combat.give('launcher');
+  combat.select('launcher');
+  const o = { x: 3, y: p.y + 1.6, z: 50 }, d = { x: 0, y: -0.02, z: 1 };
+  shoot(world, combat, CLICK, { o, d, free: true });
+  assert.equal(world.projectiles.length, 1);
+  assert.equal(p.arms.launcher.mag, 0);
+  const blasts = [];
+  for (let t = 0; t < 3 && !blasts.length; t += DT) {
+    combat.update(DT, NONE, { o, d, free: true });
+    for (const e of world.events) if (e.type === 'blast') blasts.push(e);
+    world.events.length = 0;
+  }
+  assert.equal(blasts.length, 1);
+  assert.ok(Math.abs(blasts[0].z - 80) < 4, `burst at z ${blasts[0].z.toFixed(1)}`);
+  assert.equal(world.projectiles.length, 0);
+  assert.ok(car.health <= 0 && car.burning > 0, `car health ${car.health}`);
+  assert.ok(by.health < 100 && by.down > 0);
+  // the car goes up a moment later, even though it is parked and nobody is in it
+  let exploded = false;
+  for (let t = 0; t < 2 && !exploded; t += DT) {
+    world.update(DT, { moveX: 0, moveY: 0 }, 0);
+    exploded = world.events.some((e) => e.type === 'explode' && e.v === car);
+    world.events.length = 0;
+  }
+  assert.ok(exploded);
+  // and the launcher reloads by itself
+  run(combat, WEAPONS.launcher.rate + WEAPONS.launcher.reload + 0.2);
+  assert.equal(p.arms.launcher.mag, 1);
+});
+
+test('a grenade lands, bounces to a stop and goes off when its fuse runs out', () => {
+  const { world, combat, p } = setup();
+  const q = person(world, 3, 66);
+  combat.give('grenade');
+  combat.select('grenade');
+  shoot(world, combat);
+  assert.equal(p.arms.grenade.mag, WEAPONS.grenade.start - 1);
+  const g = world.projectiles[0];
+  assert.equal(g.kind, 'grenade');
+  let t = 0, blasted = null;
+  for (; t < 4 && !blasted; t += DT) {
+    combat.update(DT, NONE, null);
+    blasted = world.events.find((e) => e.type === 'blast');
+    world.events.length = 0;
+    if (t > 1.5 && t < 1.6) assert.ok(g.y < 0.6 && Math.abs(g.vy) < 3, 'still in the air after 1.5 s');
+  }
+  assert.ok(blasted, 'no blast');
+  assert.ok(t > 2.2 && t < 2.6, `went off after ${t.toFixed(2)} s`);
+  assert.ok(Math.abs(blasted.z - 66) < 6, `landed at z ${blasted.z.toFixed(1)}, target at 66`);
+  assert.ok(q.health < 100);
+});
+
+test('through the scope, the sniper rifle drops someone a long way off', () => {
+  const { world, combat, p } = setup(3, 50);
+  const q = person(world, 3, 190);
+  combat.give('sniper');
+  combat.select('sniper');
+  const eye = { x: 3, y: p.y + 1.66, z: 50 };
+  const head = { x: 3, y: q.y + 1.7, z: 190 };
+  const l = Math.hypot(head.x - eye.x, head.y - eye.y, head.z - eye.z);
+  const aim = { o: eye, d: { x: (head.x - eye.x) / l, y: (head.y - eye.y) / l, z: (head.z - eye.z) / l }, free: true };
+  run(combat, 0.5);
+  combat.update(DT, { aim: true }, aim);
+  assert.ok(p.scoped);
+  shoot(world, combat, { ...CLICK, aim: true }, aim);
+  assert.ok(q.dead);
+  assert.ok(world.events.some((e) => e.type === 'pedKilled' && e.weapon === 'sniper'));
 });
